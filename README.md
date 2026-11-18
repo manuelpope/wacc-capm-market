@@ -22,6 +22,14 @@ PYTHONPATH=src .venv/bin/python -m uvicorn wacc_lab.api:app --reload
 
 Open <http://127.0.0.1:8000>.
 
+The analyst model is read from the environment; the defaults point at the
+Ollama running on this machine:
+
+```bash
+export WACC_LAB_LLM_BASE_URL=http://127.0.0.1:11434/v1
+export WACC_LAB_LLM_MODEL=qwen3.5:9b-mlx
+```
+
 Run the tests:
 
 ```bash
@@ -255,7 +263,7 @@ This is the honest list. None of these are hidden behind defaults.
 ```
 src/wacc_lab/
   api.py             FastAPI routes
-  service.py         Provider + cache + overrides + engines orchestration
+  service.py         Provider + cache + overrides + analyst + engines
   db.py              SQLite store
   models.py          Pydantic models
   catalog.py         The curated ticker universe
@@ -265,8 +273,10 @@ src/wacc_lab/
     valuation.py     The simple DCF
   providers/
     yahoo.py         Everything that talks to Yahoo Finance
+    analyst.py       The gap detector, the prompt and the range validation
+    llm.py           The OpenAI-compatible client
   static/            index.html, app.js, styles.css (no build step)
-tests/               Engine unit tests + API tests with a fake provider
+tests/               Engine, analyst and API tests, all offline
 odd/tasks/           The feature document used while building this
 ```
 
