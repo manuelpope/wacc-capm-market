@@ -155,6 +155,102 @@ function renderInputs(analysis) {
   }
 }
 
+function renderSensitivity(grid) {
+  const host = $("sensitivity");
+  const legend = $("sensitivity-legend");
+  host.innerHTML = "";
+  legend.innerHTML = "";
+
+  if (!grid || !grid.cells || !grid.cells.length) {
+    host.innerHTML = `<p class="news-empty">${
+      (grid && grid.warnings && grid.warnings[0]) ||
+      "The grid is not available for this company."
+    }</p>`;
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "grid-table";
+
+  const head = table.createTHead().insertRow();
+  const corner = document.createElement("th");
+  corner.textContent = "g \ WACC";
+  head.appendChild(corner);
+  for (const wacc of grid.wacc_axis) {
+    const cell = document.createElement("th");
+    cell.textContent = pct(wacc, 2);
+    head.appendChild(cell);
+  }
+
+  const body = table.createTBody();
+  for (let row = grid.g_axis.length - 1; row >= 0; row -= 1) {
+    const line = body.insertRow();
+    const rowHead = document.createElement("th");
+    rowHead.textContent = pct(grid.g_axis[row], 2);
+    line.appendChild(rowHead);
+
+    for (let column = 0; column < grid.wacc_axis.length; column += 1) {
+      const source = grid.cells[row][column];
+      const cell = document.createElement("td");
+      if (!source.valid) {
+        cell.className = "invalid";
+        cell.textContent = "n/a";
+        cell.title = "the growth rate is not below the WACC, so the terminal value does not exist";
+      } else {
+        cell.textContent = price(source.value_per_share, grid.currency);
+        if (source.upside_pct !== null && source.upside_pct !== undefined) {
+          const up = source.upside_pct >= 0;
+          cell.classList.add(up ? "up" : "down");
+          const alpha = Math.min(0.32, Math.abs(source.upside_pct) * 0.32);
+          cell.style.background = up
+            ? `rgba(56, 211, 159, ${alpha})`
+            : `rgba(255, 107, 107, ${alpha})`;
+        }
+        if (source.fragile) {
+          cell.classList.add("fragile");
+          cell.title = "the WACC and g are less than 3% apart, the terminal value dominates this number";
+        }
+        if (row === grid.base_row && column === grid.base_column) {
+          cell.classList.add("base");
+          cell.title = "base case";
+        }
+      }
+      line.appendChild(cell);
+    }
+  }
+  host.appendChild(table);
+
+  const items = [
+    ["background: rgba(56, 211, 159, 0.35)", "above the current price"],
+    ["background: rgba(255, 107, 107, 0.35)", "below the current price"],
+    ["outline: 2px solid #4da3ff; outline-offset: -2px", "base case"],
+    ["border: 1px dashed #ffb020", "the WACC and g are less than 3% apart"]
+  ];
+  for (const [style, label] of items) {
+    const item = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.setAttribute("style", style);
+    item.append(swatch, document.createTextNode(label));
+    legend.appendChild(item);
+  }
+  const note = document.createElement("span");
+  note.textContent = "n/a = the growth rate is not below the WACC";
+  legend.appendChild(note);
+}
+
+async function loadSensitivity(ticker, useLlm) {
+  const host = $("sensitivity");
+  host.innerHTML = '<p class="news-empty">Building the grid…</p>';
+  try {
+    const grid = await request(
+      `/api/analysis/${encodeURIComponent(ticker)}/sensitivity?use_llm=${useLlm}`
+    );
+    renderSensitivity(grid);
+  } catch (err) {
+    host.innerHTML = `<p class="news-empty">${err.message}</p>`;
+  }
+}
+
 function renderNews(analysis) {
   const list = $("news");
   list.innerHTML = "";
@@ -317,6 +413,7 @@ async function analyze(ticker, refresh = false) {
     const query = refresh ? `?refresh=true&use_llm=${useLlm}` : `?use_llm=${useLlm}`;
     const analysis = await request(`/api/analysis/${encodeURIComponent(symbol)}${query}`);
     render(analysis);
+    loadSensitivity(symbol, useLlm);
   } catch (err) {
     setStatus(err.message, "error");
   } finally {

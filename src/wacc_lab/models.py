@@ -123,6 +123,28 @@ class NewsItem(BaseModel):
     relevance: int = 0
 
 
+class SensitivityCellModel(BaseModel):
+    valid: bool
+    value_per_share: float | None = None
+    upside_pct: float | None = None
+    fragile: bool = False
+
+
+class SensitivityGridModel(BaseModel):
+    ticker: str
+    currency: str | None = None
+    price: float | None = None
+    base: dict[str, float | str | None] = Field(default_factory=dict)
+    wacc_axis: list[float] = Field(default_factory=list)
+    g_axis: list[float] = Field(default_factory=list)
+    cells: list[list[SensitivityCellModel]] = Field(default_factory=list)
+    base_row: int = 0
+    base_column: int = 0
+    span: float = 0.0
+    step: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
+
+
 class TickerInfo(BaseModel):
     ticker: str
     name: str

@@ -7,6 +7,7 @@ from typing import Any
 
 from .db import Store
 from .engine.growth import GrowthInputs, apply_growth_caps, compute_growth
+from .engine.sensitivity import DEFAULT_SPAN, DEFAULT_STEP, compute_sensitivity
 from .engine.valuation import ValuationInputs, compute_valuation
 from .engine.wacc import DEFAULT_EQUITY_RISK_PREMIUM, WaccInputs, compute_wacc
 from .models import (
@@ -16,6 +17,8 @@ from .models import (
     GrowthBreakdown,
     NewsItem,
     Overrides,
+    SensitivityCellModel,
+    SensitivityGridModel,
     ValuationBreakdown,
     WaccBreakdown,
 )
@@ -75,6 +78,79 @@ class AnalysisService:
         symbol = ticker.strip().upper()
         self.store.delete_overrides(symbol)
         return self.analyze(symbol, use_llm=use_llm)
+
+    def sensitivity(
+        self,
+        ticker: str,
+        use_llm: bool = True,
+        span: float = DEFAULT_SPAN,
+        step: float = DEFAULT_STEP,
+    ) -> SensitivityGridModel:
+        """The value per share for combinations of WACC and g around the base case."""
+        symbol = ticker.strip().upper()
+        analysis = self.analyze(symbol, use_llm=use_llm)
+
+        valuation = analysis.valuation
+        if valuation is None:
+            return SensitivityGridModel(
+                ticker=symbol,
+                currency=analysis.currency,
+                price=analysis.price,
+                base={
+                    "wacc": analysis.wacc.wacc,
+                    "g": analysis.growth.growth,
+                    "value_per_share": None,
+                },
+                warnings=[
+                    "the valuation is not available for this company, the grid is empty"
+                ],
+            )
+
+        shares = float(analysis.inputs.get("shares_outstanding") or 0.0)
+        grid = compute_sensitivity(
+            base_fcf=valuation.base_fcf,
+            net_debt=valuation.net_debt,
+            shares_outstanding=shares,
+            current_price=analysis.price,
+            base_wacc=analysis.wacc.wacc,
+            base_growth=analysis.growth.growth,
+            span=span,
+            step=step,
+            years=valuation.years,
+        )
+
+        base_cell = grid.cells[grid.base_row][grid.base_column]
+        return SensitivityGridModel(
+            ticker=symbol,
+            currency=analysis.currency,
+            price=analysis.price,
+            base={
+                "wacc": analysis.wacc.wacc,
+                "g": analysis.growth.growth,
+                "value_per_share": base_cell.value_per_share,
+                "upside_pct": base_cell.upside_pct,
+                "price": analysis.price,
+            },
+            wacc_axis=grid.wacc_axis,
+            g_axis=grid.g_axis,
+            cells=[
+                [
+                    SensitivityCellModel(
+                        valid=cell.valid,
+                        value_per_share=cell.value_per_share,
+                        upside_pct=cell.upside_pct,
+                        fragile=cell.fragile,
+                    )
+                    for cell in row
+                ]
+                for row in grid.cells
+            ],
+            base_row=grid.base_row,
+            base_column=grid.base_column,
+            span=grid.span,
+            step=grid.step,
+            warnings=list(grid.warnings),
+        )
 
     # -------------------------------------------------------------- internals
     def _news_step(

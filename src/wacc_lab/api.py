@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import STATIC_DIR, Settings
 from .db import Store
-from .models import AnalysisResult, Overrides
+from .models import AnalysisResult, Overrides, SensitivityGridModel
 from .providers.analyst import AnalystExtractor
 from .providers.base import ProviderError, TickerNotFoundError
 from .providers.llm import LLMConfig, OpenAICompatibleClient
@@ -92,6 +92,24 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
     ) -> AnalysisResult:
         try:
             return active_service.analyze(ticker, refresh=refresh, use_llm=use_llm)
+        except TickerNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get(
+        "/api/analysis/{ticker}/sensitivity", response_model=SensitivityGridModel
+    )
+    def sensitivity(
+        ticker: str,
+        span: float = Query(default=0.02, description="Half width of the grid"),
+        step: float = Query(default=0.005, description="Distance between two points"),
+        use_llm: bool = Query(default=True),
+    ) -> SensitivityGridModel:
+        try:
+            return active_service.sensitivity(
+                ticker, use_llm=use_llm, span=span, step=step
+            )
         except TickerNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ProviderError as exc:

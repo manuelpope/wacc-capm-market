@@ -139,6 +139,31 @@ fallback, and `WACC_LAB_LLM_MODE=completions` switches to the plain
 
 ---
 
+## Sensitivity (WACC x g)
+
+A single value per share hides the question that matters: **how much of this
+number depends on the two assumptions that carry the most weight?** The grid
+answers it by recomputing the valuation for combinations of WACC and g around
+the base case.
+
+- **Axes**: the WACC and the g of the base case, plus or minus 2 percentage
+  points in steps of 0.5 (`?span=0.02&step=0.005`).
+- **Cells**: the value per share, shaded green when it is above the current
+  price and red when it is below, with the intensity following the distance.
+- **The outlined cell is the base case**, and it always matches the valuation
+  shown above.
+- **`n/a`** means the growth rate is not below the WACC, so the terminal value
+  does not exist and no number is reported.
+- **The dashed border** marks a cell where the WACC and g are less than 3%
+  apart: the number is there, but the terminal value dominates it, which is
+  exactly the corner a bull case lives in.
+
+For Apple the grid runs from $100.65 (WACC 12.43%, g 3%) to $698.88 (WACC
+8.43%, g 7%) — a sevenfold range around a base case of $179.43, and the two
+most optimistic corners are the fragile ones.
+
+---
+
 ## Recent news
 
 The interface has a **Recent news** section, and those headlines are also the
@@ -183,7 +208,8 @@ wrote carry an `LLM` badge.
 | `GET` | `/api/analysis/{ticker}` | The full analysis; `?refresh=true` forces a recompute, `?use_llm=false` skips the analyst and the news |
 | `POST` | `/api/analysis/{ticker}/overrides` | Saves manual inputs and recomputes |
 | `DELETE` | `/api/analysis/{ticker}/overrides` | Drops the overrides and goes back to automatic |
-| `GET` | `/api/health` | Database path and cache TTL |
+| `GET` | `/api/analysis/{ticker}/sensitivity` | The WACC x g grid; `?span=` and `?step=` size it |
+| `GET` | `/api/health` | Database path, cache TTL and the analyst configuration |
 | `GET` | `/` | The web interface |
 
 `POST /api/analysis/{ticker}/overrides` accepts any subset of:
@@ -297,6 +323,15 @@ This is the honest list. None of these are hidden behind defaults.
 21. **The news filter is textual.** A story that mentions the company in one
     sentence is kept, and a story about the company that never says its name
     is dropped. The order of the headlines is a heuristic, not a judgement.
+22. **The grid moves one thing at a time.** It perturbs the WACC and the g of a
+    simple model, so it inherits every weakness of that model and it ignores
+    the correlation between the two inputs: a WACC that falls because the
+    business got safer usually comes with a g that falls too, and the grid
+    does not show that path.
+23. **The fragile flag is a threshold, not a measurement.** A cell is flagged
+    when the WACC and g are less than 3% apart, because below that the Gordon
+    denominator stops meaning anything. How bad the number is in that corner
+    is left to the reader.
 
 ---
 
@@ -313,6 +348,7 @@ src/wacc_lab/
     wacc.py          CAPM, after-tax cost of debt, weights
     growth.py        g = ROE × b, with the ceiling and the minimum-spread rule
     valuation.py     The simple DCF
+    sensitivity.py   The WACC x g grid
   providers/
     yahoo.py         Everything that talks to Yahoo Finance
     analyst.py       The gap detector, the prompt and the range validation

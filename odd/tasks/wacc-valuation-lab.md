@@ -35,6 +35,11 @@ S7. "cuando no este disponible calcular los valores por alguna razon , usar un e
     Acceptance: `?use_llm=false` returns the exact Yahoo values; `?use_llm=true` fills only the gaps; a model failure leaves the company untouched.
     Checks: `uv run pytest tests/test_llm.py tests/test_api.py -k analyst`
 
+S9. "dale me parece interesante el siguiente paso"
+    Scope: The next step proposed at the end of the previous increment: a WACC x g sensitivity grid, so the interface answers how much of the valuation depends on the two assumptions that carry the most weight, instead of showing a single number.
+    Acceptance: The grid is centred on the base case, the base cell matches the valuation shown above it, a cell where g is not below the WACC reports no number, and a cell where the spread is under 3% is flagged as fragile.
+    Checks: `uv run pytest tests/test_sensitivity.py tests/test_api.py -k sensitivity`
+
 S8. "las unidades deben ser mas legibles cuando son modena , ademas , me gustaria una seccion de noticias reelvantes q se usan para cuando se usa el llm"
     Scope: Every monetary value in the interface is shown with the currency of the ticker, in compact notation (`$136.06B`, `$179.43`), never as a raw number. A "Recent news" section shows the headlines, and those headlines are the context the analyst model reads before estimating.
     Acceptance: The valuation card, the inputs table and the summary show the currency; the news section lists the stories with publisher and date; the prompt contains the headlines; the model is asked to take them into account and to say when a headline drove the estimate.
@@ -54,6 +59,7 @@ T4 | S5 | inline | done | f254be6 + ab1e795 — single-page interface, verified 
 T5 | S6 | inline | done | README.md — run instructions, methodology, "What it cannot do" (19 limits)
 T6 | S7 | inline | done | analyst extractor: OpenAI-compatible client, range validation, provenance, toggle
 T7 | S8 | inline | done | news provider + relevance ranking, prompt context, currency formatting, news card
+T8 | S9 | inline | done | sensitivity engine, endpoint, grid card with the colour scale and the fragile marks
 
 ## Log
 
@@ -103,3 +109,7 @@ L13 (2026-11-18): Oracle exposed a modelling defect while verifying in the brows
 L14 (2026-11-18): News section and the analyst context. The Yahoo news feed of a ticker is cached in its own table with a 6 hour TTL, ranked by whether the story names the ticker or the company, and the irrelevant ones are dropped when at least three relevant ones remain. Yahoo mixes market-wide stories into a ticker feed, so without the filter the context for the model was full of noise ("Planes, banks and the NSA all went down in one week"). The headlines, the publisher, the date and a truncated summary go into the prompt, and the model is asked to use them and to name the headline that drove the estimate. In the live run it answered: "recent outage news does not materially alter the cost of existing debt". A news failure never takes the valuation down.
 
 L15 (2026-11-18): The units are now readable: the currency of the ticker is carried through the whole response and the interface shows `$136.06B`, `$3.36T`, `$179.43` instead of `127006000000`. Three bugs were found and fixed on the way, all of them in the new code: the news never reached the builder (the service built the analysis before the news were loaded), the legacy flat news shape read `publisher` instead of `provider`, the relevance ranking had its sign inverted (the least relevant stories came first), and the company name was compared in lower case against an upper case haystack.
+
+L16 (2026-11-18): Sensitivity grid. The axes are the base WACC and the base g plus or minus 2 percentage points in steps of 0.5, which is nine by nine cells. Two kinds of cell are not numbers: a cell where g is not below the WACC has no terminal value and reports `n/a`, and a cell where the spread is under 3% is reported but marked as fragile, because the terminal value dominates it. The grid does not apply the growth ceiling of the base case, because exploring assumptions above the ceiling is the point of a grid; it applies only the mathematical rule. For Apple the grid runs from $100.65 to $698.88 around a base case of $179.43, and the two most optimistic corners are exactly the fragile ones, which is the finding the grid exists to deliver.
+
+L17 (2026-11-18): The grid is what makes the earlier corrections legible. The 5% ceiling and the 3% minimum spread are not visible as numbers in the base case, but the grid shows that the whole optimistic corner of the table lives inside the fragile zone, so a bull case built on a narrow spread is arithmetically large and economically weak.

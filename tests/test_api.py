@@ -338,3 +338,47 @@ def test_the_analyst_estimates_are_reused_instead_of_being_asked_again(tmp_path)
     assert first.json()["inputs"]["roe"] == pytest.approx(0.35)
     assert second.json()["inputs"]["roe"] == pytest.approx(0.35)
     assert provider.calls == ["AAPL"]
+
+
+# ------------------------------------------------------------------ sensitivity
+
+
+def test_the_sensitivity_endpoint_returns_the_grid(client):
+    test_client, _ = client
+
+    response = test_client.get("/api/analysis/AAPL/sensitivity")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert len(body["wacc_axis"]) == 9
+    assert len(body["g_axis"]) == 9
+    assert len(body["cells"]) == 9
+    assert len(body["cells"][0]) == 9
+
+    base_cell = body["cells"][body["base_row"]][body["base_column"]]
+    assert base_cell["valid"] is True
+    assert base_cell["value_per_share"] == pytest.approx(body["base"]["value_per_share"])
+
+
+def test_the_sensitivity_grid_is_centred_on_the_base_case(client):
+    test_client, _ = client
+
+    body = test_client.get("/api/analysis/AAPL/sensitivity").json()
+
+    assert body["base"]["wacc"] == pytest.approx(0.089)
+    assert body["wacc_axis"][body["base_column"]] == pytest.approx(body["base"]["wacc"])
+    assert body["g_axis"][body["base_row"]] == pytest.approx(body["base"]["g"])
+
+
+def test_the_sensitivity_grid_marks_a_cell_that_cannot_be_computed(client):
+    test_client, _ = client
+
+    body = test_client.get("/api/analysis/AAPL/sensitivity").json()
+
+    invalid = [
+        cell
+        for row in body["cells"]
+        for cell in row
+        if not cell["valid"]
+    ]
+    assert invalid, "the grid should contain at least one invalid cell"
