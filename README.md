@@ -1,0 +1,229 @@
+# WACC Lab
+
+FastAPI + HTML tool to compute **WACC**, **g** and a simple DCF for Yahoo Finance
+tickers. Results are stored in SQLite and recomputed when they are missing or stale.
+
+The flow is deliberately small: pick a ticker, get the numbers, override whatever
+you disagree with, and read the valuation.
+
+![stack](https://img.shields.io/badge/python-3.11%2B-blue) ![deps](https://img.shields.io/badge/deps-fastapi%20%7C%20yfinance%20%7C%20sqlite3-lightgrey)
+
+---
+
+## Quick start
+
+```bash
+cd projects/wacc-lab
+uv venv --python 3.13
+uv pip install -e ".[dev]"
+
+PYTHONPATH=src .venv/bin/python -m uvicorn wacc_lab.api:app --reload
+```
+
+Open <http://127.0.0.1:8000>.
+
+Run the tests:
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+The test suite never touches the network: the API tests inject a fake provider.
+
+---
+
+## How it works
+
+### 1. Where the inputs come from
+
+Everything is pulled from Yahoo Finance through `yfinance` (quote profile plus the
+quarterly income, balance and cash-flow statements).
+
+| Input | Source | Notes |
+|---|---|---|
+| Risk-free rate | `^TNX` (10Y Treasury) | Quoted in percent, normalized defensively for the legacy ×10 quoting |
+| Beta | `info["beta"]` | Falls back to a 5-year monthly beta against `^GSPC`, then to 1.0 |
+| Cost of equity | CAPM | `Rf + β × ERP`, ERP = 5.00% by default |
+| Cost of debt | Interest expense ÷ total debt | Falls back to `Rf + 1.5%` |
+| Tax rate | Tax provision ÷ pre-tax income (TTM) | Falls back to `info["taxRate"]`, then 21% |
+| Capital structure | Total debt vs. market cap | Debt weight = D / (D + E) |
+| ROE | TTM net income ÷ average book equity | Recomputed, never taken from Yahoo (see below) |
+| Retention ratio | 1 − (dividends ÷ net income) | Annual fallback when no quarterly dividend row exists |
+| Free cash flow | TTM `Free Cash Flow` | Falls back to operating cash flow + capex |
+
+**ROE is recomputed on purpose.** Yahoo's `returnOnEquity` is inflated for
+companies that buy back stock (Apple reports ~142%). ROE is therefore taken from
+trailing net income over average book equity, which is closer to the textbook
+definition — but it is still inflated for companies shrinking their equity.
+
+### 2. The growth rate
+
+`g = ROE × retention ratio` (sustainable internal growth) by default, then capped
+twice:
+
+- **at a 5% ceiling** — a perpetual growth rate above long-run nominal GDP is not
+  sustainable;
+- **so the WACC − g spread stays at least 3% wide** — a narrow spread makes the
+  Gordon terminal value explode.
+
+Every cap reports why it fired, in the `Growth` card and in the warnings list. A
+manual growth rate skips the ceiling but still obeys the minimum spread.
+
+### 3. The valuation
+
+A deliberately simple FCFF-style DCF:
+
+```
+FCF_t      = FCF_0 × (1 + g)^t
+PV explicit = Σ FCF_t / (1 + WACC)^t          for t = 1..5
+TV          = FCF_5 × (1 + g) / (WACC − g)
+EV          = PV explicit + TV / (1 + WACC)^5
+Equity      = EV − net debt
+Value/share = Equity / shares outstanding
+```
+
+The terminal value share of the EV is displayed on purpose: when it is above 85%
+the result lives almost entirely on the perpetuity assumption, and the tool says so.
+
+---
+
+## API
+
+| Method | Route | What it does |
+|---|---|---|
+| `GET` | `/api/tickers` | The curated universe (69 tickers, grouped by sector) |
+| `GET` | `/api/analysis/{ticker}` | The full analysis; `?refresh=true` forces a recompute |
+| `POST` | `/api/analysis/{ticker}/overrides` | Saves manual inputs and recomputes |
+| `DELETE` | `/api/analysis/{ticker}/overrides` | Drops the overrides and goes back to automatic |
+| `GET` | `/api/health` | Database path and cache TTL |
+| `GET` | `/` | The web interface |
+
+`POST /api/analysis/{ticker}/overrides` accepts any subset of:
+
+```json
+{
+  "beta": 1.2,
+  "risk_free_rate": 0.045,
+  "equity_risk_premium": 0.055,
+  "pretax_cost_of_debt": 0.055,
+  "tax_rate": 0.25,
+  "debt_weight": 0.15,
+  "growth_rate": 0.03,
+  "base_fcf": 1.2e10,
+  "projection_years": 5
+}
+```
+
+---
+
+## Persistence
+
+One SQLite file (`data/wacc_lab.db`) with four tables:
+
+| Table | Content |
+|---|---|
+| `snapshots` | The raw fundamentals per ticker, with the fetch timestamp |
+| `analyses` | The latest computed analysis per ticker |
+| `overrides` | The manual inputs per ticker |
+| `universe` | The curated ticker catalog |
+
+Cache behaviour:
+
+- ticker not stored → compute it and store it (`cache.status = "computed"`);
+- stored but older than the TTL (24h by default) → recompute (`"stale"`);
+- stored and fresh → serve from SQLite without touching Yahoo (`"fresh"`);
+- `?refresh=true` → always recompute (`"refreshed"`).
+
+Configuration via environment variables:
+
+```bash
+WACC_LAB_DB=/path/to/db.sqlite       # default: data/wacc_lab.db
+WACC_LAB_TTL_HOURS=24                # default: 24
+```
+
+---
+
+## What it cannot do
+
+This is the honest list. None of these are hidden behind defaults.
+
+1. **It is not a full DCF.** One FCF base growing at one rate, discounted at one
+   rate. There is no working capital schedule, no capex plan, no debt schedule,
+   no three-statement model, and no mid-year convention.
+2. **FCF is not normalized.** It is the latest trailing twelve months. A single
+   unusual quarter (a tax payment, a working capital squeeze, a restructuring)
+   moves the valuation proportionally. There is no 3- or 5-year average.
+3. **g is an identity, not a forecast.** `ROE × retention` says what growth the
+   current returns can fund; it says nothing about what the market expects. It is
+   also inflated by buybacks, which is why it usually hits the 5% ceiling.
+4. **The caps are policy, not finance.** The 5% ceiling and the 3% minimum spread
+   move the answer. They exist to keep the perpetuity meaningful; they are not
+   derived from anything.
+5. **Beta is raw.** Yahoo's 5-year monthly beta, with no Blume adjustment, no
+   country risk, no size premium and no idiosyncratic risk adjustment. The ERP is
+   a fixed 5.00%, not estimated.
+6. **The cost of debt is approximate.** Interest expense over the *latest* total
+   debt, not the average debt of the period. For companies that changed their
+   debt level during the year the ratio is biased, and interest expense that nets
+   against interest income understates the true cost.
+7. **The capital structure is incomplete.** Market cap plus total debt. Operating
+   leases, pensions, minority interests, preferred stock and unfunded obligations
+   are ignored.
+8. **The tax rate is effective, not marginal.** Trailing tax provision over
+   trailing pre-tax income. Net operating losses, credits and deferred taxes are
+   ignored.
+9. **No currency conversion.** Every figure stays in the reporting currency of the
+   ticker. Comparing a US dollar DCF with a euro or yen one is not meaningful.
+10. **No consensus estimates, no scenarios, no sensitivity tables.** There is no
+    analyst forecast, no bull/base/bear case, no WACC × g grid and no Monte Carlo.
+    The model gives one number plus its warnings.
+11. **Yahoo Finance data is scraped, not contracted.** `yfinance` reads
+    non-public endpoints. Row names change, fields go missing, and rate limiting
+    happens. A missing field silently becomes a fallback with a warning, never a
+    crash.
+12. **TTM assumes four quarters.** If a company has fewer quarters reported, the
+    sum covers a shorter period and the tool does not say so.
+13. **Value per share ignores future dilution.** It uses current shares
+    outstanding; stock-based compensation and convertible instruments are not
+    projected.
+14. **One local user, one file.** No authentication, no multi-user isolation, no
+    migration story beyond the `CREATE TABLE IF NOT EXISTS` schema. The database
+    is local and unencrypted.
+15. **Only the latest analysis is kept.** There is no valuation history per
+    ticker, so you cannot see how the WACC moved over time.
+16. **Manual growth is still constrained.** A manual g is not subject to the 5%
+    ceiling, but it is forced to keep the minimum spread below the WACC. The
+    result reports that it was capped.
+
+---
+
+## Layout
+
+```
+src/wacc_lab/
+  api.py             FastAPI routes
+  service.py         Provider + cache + overrides + engines orchestration
+  db.py              SQLite store
+  models.py          Pydantic models
+  catalog.py         The curated ticker universe
+  engine/
+    wacc.py          CAPM, after-tax cost of debt, weights
+    growth.py        g = ROE × b, with the ceiling and the minimum-spread rule
+    valuation.py     The simple DCF
+  providers/
+    yahoo.py         Everything that talks to Yahoo Finance
+  static/            index.html, app.js, styles.css (no build step)
+tests/               Engine unit tests + API tests with a fake provider
+odd/tasks/           The feature document used while building this
+```
+
+---
+
+## Where this goes next
+
+Built simple first, on purpose. The next increments, in order of value:
+
+1. Valuation history per ticker, so you can see the WACC move over time.
+2. A WACC × g sensitivity grid, which is where the real insight is.
+3. Normalized FCF (3-year average) and a scenario per company.
+4. A second provider (SEC filings / financialmodelingprep) to cross-check Yahoo.

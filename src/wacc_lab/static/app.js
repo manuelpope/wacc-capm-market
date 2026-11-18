@@ -1,14 +1,14 @@
 const state = { ticker: null, analysis: null };
 
 const OVERRIDE_FIELDS = [
-  { key: "beta", label: "Beta", auto: (i) => i.beta, step: "0.01" },
-  { key: "risk_free_rate", label: "Risk-free rate (%)", auto: (i) => i.risk_free_rate, percent: true, step: "0.01" },
-  { key: "equity_risk_premium", label: "Equity risk premium (%)", auto: (i) => i.equity_risk_premium, percent: true, step: "0.01" },
-  { key: "pretax_cost_of_debt", label: "Pre-tax cost of debt (%)", auto: (i) => i.pretax_cost_of_debt, percent: true, step: "0.01" },
-  { key: "tax_rate", label: "Tax rate (%)", auto: (i) => i.tax_rate, percent: true, step: "0.01" },
-  { key: "debt_weight", label: "Debt weight (%)", auto: (i) => i.debt_weight, percent: true, step: "0.01" },
+  { key: "beta", label: "Beta", auto: (a) => a.inputs.beta, step: "0.01" },
+  { key: "risk_free_rate", label: "Risk-free rate (%)", auto: (a) => a.inputs.risk_free_rate, percent: true, step: "0.01" },
+  { key: "equity_risk_premium", label: "Equity risk premium (%)", auto: (a) => a.inputs.equity_risk_premium, percent: true, step: "0.01" },
+  { key: "pretax_cost_of_debt", label: "Pre-tax cost of debt (%)", auto: (a) => a.inputs.pretax_cost_of_debt, percent: true, step: "0.01" },
+  { key: "tax_rate", label: "Tax rate (%)", auto: (a) => a.inputs.tax_rate, percent: true, step: "0.01" },
+  { key: "debt_weight", label: "Debt weight (%)", auto: (a) => a.inputs.debt_weight, percent: true, step: "0.01" },
   { key: "growth_rate", label: "Growth g (%)", auto: (a) => a.growth.raw_growth, percent: true, step: "0.01" },
-  { key: "base_fcf", label: "Base free cash flow", auto: (i) => i.base_fcf, step: "1" },
+  { key: "base_fcf", label: "Base free cash flow", auto: (a) => a.inputs.base_fcf, step: "1" },
   { key: "projection_years", label: "Projection horizon (years)", auto: () => 5, step: "1" }
 ];
 
@@ -290,6 +290,10 @@ async function init() {
     const health = await request("/api/health");
     $("health").textContent = `SQLite · TTL ${health.ttl_hours}h`;
     await loadCatalog();
+    const saved = window.localStorage.getItem("wacc-lab-ticker");
+    if (saved) {
+      analyze(saved);
+    }
   } catch (err) {
     setStatus(err.message, "error");
   }
