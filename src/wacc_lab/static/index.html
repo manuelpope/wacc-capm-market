@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WACC Lab</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>WACC Lab</h1>
+      <p class="subtitle">WACC, g and a simple DCF for Yahoo Finance tickers. Results are stored in SQLite and recomputed when they go stale.</p>
+    </div>
+    <div class="topbar-actions">
+      <span id="health" class="badge badge-muted">checking…</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="picker">
+        <div class="picker-field">
+          <label for="ticker-select">Curated tickers</label>
+          <select id="ticker-select"></select>
+        </div>
+        <div class="picker-field">
+          <label for="ticker-input">Any Yahoo ticker</label>
+          <input id="ticker-input" type="text" placeholder="e.g. AAPL, TTE, 005930.KS" autocomplete="off" />
+        </div>
+        <div class="picker-actions">
+          <button id="load-btn" class="btn btn-primary">Analyze</button>
+          <button id="refresh-btn" class="btn">Refresh from Yahoo</button>
+        </div>
+      </div>
+      <div id="status" class="status status-idle">Pick a ticker to compute its WACC and g.</div>
+    </section>
+
+    <section id="results" class="results hidden">
+      <section class="card">
+        <h2>Summary</h2>
+        <div class="headline">
+          <div class="headline-item">
+            <span class="headline-label">Company</span>
+            <span id="company-name" class="headline-value">—</span>
+            <span id="company-meta" class="headline-meta">—</span>
+          </div>
+          <div class="headline-item">
+            <span class="headline-label">WACC</span>
+            <span id="headline-wacc" class="headline-value">—</span>
+            <span class="headline-meta">discount rate</span>
+          </div>
+          <div class="headline-item">
+            <span class="headline-label">g</span>
+            <span id="headline-growth" class="headline-value">—</span>
+            <span id="headline-growth-meta" class="headline-meta">perpetual growth</span>
+          </div>
+          <div class="headline-item">
+            <span class="headline-label">Value / share</span>
+            <span id="headline-value" class="headline-value">—</span>
+            <span id="headline-value-meta" class="headline-meta">DCF estimate</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>WACC</h2>
+          <table class="kv">
+            <tbody>
+              <tr><th>Risk-free rate</th><td id="wacc-rf">—</td></tr>
+              <tr><th>Equity risk premium</th><td id="wacc-erp">—</td></tr>
+              <tr><th>Beta</th><td id="wacc-beta">—</td></tr>
+              <tr><th>Cost of equity (CAPM)</th><td id="wacc-ke">—</td></tr>
+              <tr><th>Pre-tax cost of debt</th><td id="wacc-kd">—</td></tr>
+              <tr><th>Tax rate</th><td id="wacc-tax">—</td></tr>
+              <tr><th>After-tax cost of debt</th><td id="wacc-kd-at">—</td></tr>
+              <tr><th>Debt weight</th><td id="wacc-wd">—</td></tr>
+              <tr><th>Equity weight</th><td id="wacc-we">—</td></tr>
+              <tr class="row-strong"><th>WACC</th><td id="wacc-final">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2>Growth (g)</h2>
+          <table class="kv">
+            <tbody>
+              <tr><th>Method</th><td id="growth-method">—</td></tr>
+              <tr><th>ROE</th><td id="growth-roe">—</td></tr>
+              <tr><th>Retention ratio</th><td id="growth-retention">—</td></tr>
+              <tr><th>Raw g (ROE × retention)</th><td id="growth-raw">—</td></tr>
+              <tr><th>Capped</th><td id="growth-capped">—</td></tr>
+              <tr><th>Reason</th><td id="growth-reason">—</td></tr>
+              <tr class="row-strong"><th>g used</th><td id="growth-final">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2>Valuation (simple DCF)</h2>
+          <table class="kv">
+            <tbody>
+              <tr><th>Base free cash flow (TTM)</th><td id="val-fcf">—</td></tr>
+              <tr><th>Projection horizon</th><td id="val-years">—</td></tr>
+              <tr><th>PV of explicit forecast</th><td id="val-pv-explicit">—</td></tr>
+              <tr><th>Terminal value</th><td id="val-tv">—</td></tr>
+              <tr><th>PV of terminal value</th><td id="val-pv-tv">—</td></tr>
+              <tr><th>Enterprise value</th><td id="val-ev">—</td></tr>
+              <tr><th>Net debt</th><td id="val-net-debt">—</td></tr>
+              <tr class="row-strong"><th>Equity value</th><td id="val-equity">—</td></tr>
+              <tr><th>Value per share</th><td id="val-per-share">—</td></tr>
+              <tr><th>Current price</th><td id="val-price">—</td></tr>
+              <tr><th>Upside</th><td id="val-upside">—</td></tr>
+            </tbody>
+          </table>
+          <div id="val-projection" class="projection"></div>
+        </section>
+
+        <section class="card">
+          <h2>Inputs <span class="hint">leave an override empty to keep the automatic value</span></h2>
+          <table class="kv inputs">
+            <thead>
+              <tr><th>Input</th><th>Automatic</th><th>Override</th></tr>
+            </thead>
+            <tbody id="inputs-body"></tbody>
+          </table>
+          <div class="actions">
+            <button id="save-btn" class="btn btn-primary">Save overrides &amp; recompute</button>
+            <button id="reset-btn" class="btn">Reset to automatic</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="card warnings-card">
+        <h2>Warnings</h2>
+        <ul id="warnings" class="warnings"></ul>
+      </section>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
