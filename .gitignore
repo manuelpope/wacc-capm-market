@@ -4,5 +4,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 data/*.db
-data/*.db-journal
+data/*.db-*
 .DS_Store
