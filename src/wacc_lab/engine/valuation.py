@@ -67,7 +67,14 @@ def compute_valuation(inputs: ValuationInputs) -> ValuationResult:
 
     value_per_share: float | None = None
     upside_pct: float | None = None
-    if inputs.shares_outstanding > 0:
+    if inputs.base_fcf <= 0:
+        # A growing perpetuity on a negative cash flow is always negative: the
+        # number would be arithmetic, not valuation.
+        warnings.append(
+            "free cash flow is not positive, the valuation rests on a negative base, "
+            "no value per share is reported"
+        )
+    elif inputs.shares_outstanding > 0:
         value_per_share = equity_value / inputs.shares_outstanding
         if inputs.current_price and inputs.current_price > 0:
             upside_pct = (value_per_share - inputs.current_price) / inputs.current_price
@@ -79,11 +86,6 @@ def compute_valuation(inputs: ValuationInputs) -> ValuationResult:
         warnings.append(
             f"the terminal value is {terminal_value_share:.0%} of the enterprise value, "
             "the result lives almost entirely on the perpetuity assumption"
-        )
-
-    if inputs.base_fcf <= 0:
-        warnings.append(
-            "free cash flow is not positive, the valuation rests on a negative base and is not meaningful"
         )
     if equity_value < 0:
         warnings.append(

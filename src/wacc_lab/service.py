@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .db import Store
@@ -17,6 +18,7 @@ from .models import (
     ValuationBreakdown,
     WaccBreakdown,
 )
+from .providers.analyst import AnalystEstimate, AnalystExtractor, missing_gaps
 from .providers.base import FundamentalsProvider
 
 DEFAULT_TAX_RATE = 0.21
@@ -31,44 +33,93 @@ class AnalysisService:
         store: Store,
         provider: FundamentalsProvider,
         ttl_hours: float = 24.0,
+        analyst: AnalystExtractor | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
         self.ttl_hours = ttl_hours
+        self.analyst = analyst
 
     # ------------------------------------------------------------- public API
-    def analyze(self, ticker: str, refresh: bool = False) -> AnalysisResult:
+    def analyze(
+        self, ticker: str, refresh: bool = False, use_llm: bool = True
+    ) -> AnalysisResult:
         symbol = ticker.strip().upper()
-        fundamentals, status = self._snapshot(symbol, refresh)
+        fundamentals, status = self._snapshot(symbol, refresh, use_llm)
         overrides = self.store.get_overrides(symbol)
         result = self._build(symbol, fundamentals, overrides, status)
         computed_at = self.store.save_analysis(symbol, result.model_dump(mode="json"))
         result.cache.computed_at = computed_at
         return result
 
-    def set_overrides(self, ticker: str, overrides: Overrides) -> AnalysisResult:
+    def set_overrides(
+        self, ticker: str, overrides: Overrides, use_llm: bool = True
+    ) -> AnalysisResult:
         symbol = ticker.strip().upper()
         self.store.save_overrides(symbol, overrides)
-        return self.analyze(symbol)
+        return self.analyze(symbol, use_llm=use_llm)
 
-    def clear_overrides(self, ticker: str) -> AnalysisResult:
+    def clear_overrides(self, ticker: str, use_llm: bool = True) -> AnalysisResult:
         symbol = ticker.strip().upper()
         self.store.delete_overrides(symbol)
-        return self.analyze(symbol)
+        return self.analyze(symbol, use_llm=use_llm)
 
     # -------------------------------------------------------------- internals
-    def _snapshot(self, symbol: str, refresh: bool) -> tuple[Fundamentals, str]:
+    def _snapshot(
+        self, symbol: str, refresh: bool, use_llm: bool
+    ) -> tuple[Fundamentals, str]:
         if refresh:
-            return self._fetch(symbol), "refreshed"
+            fundamentals, status = self._fetch(symbol), "refreshed"
+        else:
+            fundamentals = self.store.get_snapshot(symbol)
+            if fundamentals is None:
+                fundamentals, status = self._fetch(symbol), "computed"
+            elif not fundamentals.field_sources:
+                # A snapshot written before the provenance was tracked cannot be
+                # used: the analyst step would not know what Yahoo really computed.
+                fundamentals, status = self._fetch(symbol), "stale"
+            else:
+                age = self.store.snapshot_age_hours(symbol)
+                if age is not None and age > self.ttl_hours:
+                    fundamentals, status = self._fetch(symbol), "stale"
+                else:
+                    status = "fresh"
 
-        fundamentals = self.store.get_snapshot(symbol)
-        if fundamentals is None:
-            return self._fetch(symbol), "computed"
+        if use_llm and self.analyst is not None:
+            fundamentals = self._analyst_step(symbol, fundamentals)
+        return fundamentals, status
 
-        age = self.store.snapshot_age_hours(symbol)
-        if age is not None and age > self.ttl_hours:
-            return self._fetch(symbol), "stale"
-        return fundamentals, "fresh"
+    def _analyst_step(self, symbol: str, fundamentals: Fundamentals) -> Fundamentals:
+        """Fill the gaps the provider left with the analyst model.
+
+        The estimates are stored next to the snapshot, so a second request
+        does not pay for the model again, and a request with the analyst
+        switched off simply ignores them.
+        """
+        gaps = missing_gaps(fundamentals)
+        if not gaps:
+            return fundamentals
+
+        stored = self.store.get_llm_estimates(symbol)
+        if (
+            stored
+            and stored.get("snapshot_at") == fundamentals.fetched_at
+            and set(gaps).issubset(stored.get("values", {}))
+        ):
+            estimate = AnalystEstimate(
+                values=stored.get("values", {}), notes=stored.get("notes", {})
+            )
+        else:
+            estimate = self.analyst.estimate(symbol, fundamentals, gaps)
+            if estimate.values:
+                self.store.save_llm_estimates(
+                    ticker=symbol,
+                    snapshot_at=fundamentals.fetched_at,
+                    model=self.analyst.model_label,
+                    values=estimate.values,
+                    notes=estimate.notes,
+                )
+        return self.analyst.apply(fundamentals, estimate)
 
     def _fetch(self, symbol: str) -> Fundamentals:
         fundamentals = self.provider.fetch(symbol)
@@ -83,7 +134,9 @@ class AnalysisService:
         status: str,
     ) -> AnalysisResult:
         active = overrides or Overrides()
-        warnings: list[str] = list(fundamentals.warnings)
+        warnings: list[str] = [
+            re.sub(r"^\[[a-z_]+\] ", "", warning) for warning in fundamentals.warnings
+        ]
 
         risk_free_rate = self._resolve(
             active.risk_free_rate,
@@ -173,6 +226,7 @@ class AnalysisService:
             sector=fundamentals.sector,
             currency=fundamentals.currency,
             price=fundamentals.price,
+            field_sources=fundamentals.field_sources,
             cache=CacheInfo(
                 status=status,
                 snapshot_at=fundamentals.fetched_at,

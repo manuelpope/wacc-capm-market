@@ -37,6 +37,7 @@ class Fundamentals(BaseModel):
     revenue_ttm: float | None = None
 
     fetched_at: str
+    field_sources: dict[str, str] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -104,6 +105,7 @@ class AnalysisResult(BaseModel):
     price: float | None = None
     cache: CacheInfo
     inputs: dict[str, float | str | None]
+    field_sources: dict[str, str] = Field(default_factory=dict)
     overrides: Overrides | None = None
     wacc: WaccBreakdown
     growth: GrowthBreakdown

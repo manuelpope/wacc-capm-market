@@ -217,6 +217,23 @@ def test_valuation_warns_on_negative_free_cash_flow():
     assert any("free cash flow" in w.lower() for w in result.warnings)
 
 
+def test_valuation_reports_no_value_per_share_on_a_negative_free_cash_flow():
+    result = compute_valuation(
+        ValuationInputs(
+            base_fcf=-50.0,
+            growth_rate=0.02,
+            wacc=0.09,
+            years=5,
+            net_debt=0.0,
+            shares_outstanding=10.0,
+            current_price=20.0,
+        )
+    )
+
+    assert result.value_per_share is None
+    assert result.upside_pct is None
+
+
 def test_valuation_without_shares_reports_no_per_share_value():
     result = compute_valuation(
         ValuationInputs(

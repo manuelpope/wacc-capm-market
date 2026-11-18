@@ -10,13 +10,44 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "wacc_lab.db"
 DEFAULT_TTL_HOURS = 24.0
+DEFAULT_LLM_BASE_URL = "http://127.0.0.1:11434/v1"
+DEFAULT_LLM_MODEL = "qwen3.5:9b-mlx"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+@dataclass(frozen=True)
+class LLMSettings:
+    enabled: bool = True
+    base_url: str = "http://127.0.0.1:11434/v1"
+    model: str = DEFAULT_LLM_MODEL
+    api_key: str | None = None
+    timeout: float = 180.0
+    mode: str = "chat"
+
+    @classmethod
+    def from_env(cls) -> "LLMSettings":
+        enabled_raw = os.environ.get("WACC_LAB_LLM_ENABLED")
+        enabled = enabled_raw.strip().lower() not in {"0", "false", "no", "off"} if enabled_raw else True
+        timeout_raw = os.environ.get("WACC_LAB_LLM_TIMEOUT")
+        try:
+            timeout = float(timeout_raw) if timeout_raw else 180.0
+        except ValueError:
+            timeout = 180.0
+        return cls(
+            enabled=enabled,
+            base_url=os.environ.get("WACC_LAB_LLM_BASE_URL", DEFAULT_LLM_BASE_URL),
+            model=os.environ.get("WACC_LAB_LLM_MODEL", DEFAULT_LLM_MODEL),
+            api_key=os.environ.get("WACC_LAB_LLM_API_KEY") or None,
+            timeout=timeout,
+            mode=os.environ.get("WACC_LAB_LLM_MODE", "chat"),
+        )
 
 
 @dataclass(frozen=True)
 class Settings:
     db_path: Path = DEFAULT_DB_PATH
     ttl_hours: float = DEFAULT_TTL_HOURS
+    llm: LLMSettings = LLMSettings()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -26,4 +57,4 @@ class Settings:
             ttl_hours = float(ttl_raw) if ttl_raw else DEFAULT_TTL_HOURS
         except ValueError:
             ttl_hours = DEFAULT_TTL_HOURS
-        return cls(db_path=db_path, ttl_hours=ttl_hours)
+        return cls(db_path=db_path, ttl_hours=ttl_hours, llm=LLMSettings.from_env())

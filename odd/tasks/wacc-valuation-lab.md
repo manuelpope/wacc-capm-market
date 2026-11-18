@@ -30,6 +30,11 @@ S5. "esta api tiene una interfaz"
     Acceptance: The page loads without a build step and performs the full flow from the browser.
     Checks: `uv run pytest tests/test_api.py -k static` + manual browser check
 
+S7. "cuando no este disponible calcular los valores por alguna razon , usar un extractor analista con llm"
+    Scope: A local LLM fills the five inputs Yahoo Finance could not compute (pre-tax cost of debt, effective tax rate, ROE, retention ratio, free cash flow margin). It never overwrites a Yahoo value, it never estimates a scale, and an unknown ticker is never handed to the model. Every value it writes is labelled `llm` in `field_sources`, carries a warning and shows an LLM badge in the interface.
+    Acceptance: `?use_llm=false` returns the exact Yahoo values; `?use_llm=true` fills only the gaps; a model failure leaves the company untouched.
+    Checks: `uv run pytest tests/test_llm.py tests/test_api.py -k analyst`
+
 S6. "empezamos desde lo simple a lo complejo siempre"
     Scope: v1 ships the whole flow end-to-end (pick → compute → persist → value). Complexity is added by editing existing units, not by replacing them.
     Acceptance: README documents how to run, the methodology, and a "What it cannot do" section.
@@ -41,7 +46,8 @@ T1 | S2, S3 | inline | done | f260f57 — engines + unit tests (14 tests, RED ob
 T2 | S1, S4 | inline | done | f254be6 — SQLite store, catalog (69 tickers), provider, API
 T3 | S2, S3, S4 | inline | done | ab1e795 — growth ceiling + minimum WACC-g spread, TV share
 T4 | S5 | inline | done | f254be6 + ab1e795 — single-page interface, verified in the browser
-T5 | S6 | inline | done | README.md — run instructions, methodology, "What it cannot do" (16 limits)
+T5 | S6 | inline | done | README.md — run instructions, methodology, "What it cannot do" (19 limits)
+T6 | S7 | inline | done | analyst extractor: OpenAI-compatible client, range validation, provenance, toggle
 
 ## Log
 
@@ -74,3 +80,16 @@ L7 (2026-11-18): Data traps found and handled, each with a warning attached: Yah
 L8 (2026-11-18): Browser verification of the whole flow on the live server: catalog loaded, NVDA analyzed from the SQLite cache, a manual g override of 2.5% applied and recomputed, then reset back to the automatic value. The reset button did not fire on the first click; the cause was a stale click coordinate after the re-render, not an application defect — the live DELETE endpoint answered 200 and the same click with a fresh ref issued the DELETE.
 
 L9 (2026-11-18): Next step for the user: pick the next increment. The cheapest high-value one is the WACC x g sensitivity grid, because the current output is a single number plus warnings and the sensitivity of the answer to those two inputs is the actual finding.
+
+L10 (2026-11-18): Analyst fallback implemented on top of the existing provider. Design decisions, all pinned by tests:
+- the model may fill only what the provider marked as a fallback or as unavailable: `pretax_cost_of_debt`, `tax_rate`, `roe`, `retention_ratio` and the free cash flow *margin*. The cash flow itself is the margin multiplied by the trailing revenue Yahoo reported, so the model never invents a scale;
+- the provider now records the provenance of every field (`field_sources`), which is what decides whether a field is a gap;
+- a value has to land inside a plausible band for its field; a whole percentage (`21`) is normalized to a fraction (`0.21`) when the fraction is plausible, otherwise the answer is discarded and reported;
+- the estimates live in their own table next to the snapshot, so a second request costs nothing and `use_llm=false` ignores them completely;
+- a ticker Yahoo does not know is never given to the model, and a Yahoo outage is an error, not an invitation to invent a company.
+
+L11 (2026-11-18): The user corrected the model choice: `qwen3.5:9b-mlx` was already installed locally, and no model should be downloaded. The `qwen3:8b` pull (5.2 GB) that was started in the background was removed with `ollama rm`, and the default is now `qwen3.5:9b-mlx`.
+
+L12 (2026-11-18): Latency finding that made the feature usable. A qwen3.5 request took about four minutes with the model defaults (thinking on, a 262k context). With `reasoning_effort: none` and `options: {num_ctx: 8192, num_predict: 600}` the same extraction takes under one second, so the client sends those parameters and falls back to plainer payloads when a server rejects them. A full analysis with a cold model is now under ten seconds and a cached one is under thirty milliseconds.
+
+L13 (2026-11-18): Oracle exposed a modelling defect while verifying in the browser: its trailing free cash flow is negative (-28.7B), and the model reported a value per share of -210, which is arithmetic rather than valuation. The valuation engine no longer reports a value per share when the base cash flow is not positive, and says why.

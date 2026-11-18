@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS overrides (
     payload     TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS llm_estimates (
+    ticker       TEXT PRIMARY KEY,
+    updated_at   TEXT NOT NULL,
+    snapshot_at  TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    payload      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS universe (
     ticker    TEXT PRIMARY KEY,
     name      TEXT NOT NULL,
@@ -158,6 +166,41 @@ class Store:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM overrides WHERE ticker = ?", (ticker,))
             return cursor.rowcount > 0
+
+    # -------------------------------------------------------- llm estimates
+    def save_llm_estimates(
+        self,
+        ticker: str,
+        snapshot_at: str,
+        model: str,
+        values: dict[str, float],
+        notes: dict[str, str] | None = None,
+    ) -> str:
+        updated_at = utcnow_iso()
+        payload = {"values": values, "notes": notes or {}}
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO llm_estimates (ticker, updated_at, snapshot_at, model, payload) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(ticker) DO UPDATE SET updated_at=excluded.updated_at, "
+                "snapshot_at=excluded.snapshot_at, model=excluded.model, "
+                "payload=excluded.payload",
+                (ticker, updated_at, snapshot_at, model, json.dumps(payload)),
+            )
+        return updated_at
+
+    def get_llm_estimates(self, ticker: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT snapshot_at, model, payload FROM llm_estimates WHERE ticker = ?",
+                (ticker,),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row["payload"])
+        payload["snapshot_at"] = row["snapshot_at"]
+        payload["model"] = row["model"]
+        return payload
 
     # -------------------------------------------------------------- universe
     def list_universe(self) -> list[dict[str, Any]]:

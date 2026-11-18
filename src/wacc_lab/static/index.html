@@ -31,6 +31,10 @@
         <div class="picker-actions">
           <button id="load-btn" class="btn btn-primary">Analyze</button>
           <button id="refresh-btn" class="btn">Refresh from Yahoo</button>
+          <label class="checkbox" title="Ask the local analyst model for the inputs Yahoo Finance could not supply">
+            <input type="checkbox" id="llm-toggle" checked />
+            <span>Analyst model for missing data</span>
+          </label>
         </div>
       </div>
       <div id="status" class="status status-idle">Pick a ticker to compute its WACC and g.</div>

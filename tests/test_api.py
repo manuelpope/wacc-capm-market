@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from wacc_lab.api import create_app
 from wacc_lab.db import Store
 from wacc_lab.models import Fundamentals
+from wacc_lab.providers.analyst import AnalystExtractor
 from wacc_lab.providers.base import TickerNotFoundError
 from wacc_lab.service import AnalysisService
 
@@ -36,7 +37,24 @@ SAMPLE = Fundamentals(
     net_income_ttm=200.0,
     revenue_ttm=2000.0,
     fetched_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    field_sources={
+        "pretax_cost_of_debt": "yahoo",
+        "tax_rate": "yahoo",
+        "roe": "yahoo",
+        "retention_ratio": "yahoo",
+        "fcf_ttm": "yahoo",
+    },
 )
+
+
+class FakeLLM:
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.calls: list[str] = []
+
+    def complete(self, prompt: str, system: str | None = None) -> str:
+        self.calls.append(prompt)
+        return self.response
 
 
 class FakeProvider:
@@ -44,7 +62,7 @@ class FakeProvider:
         self.fundamentals = fundamentals
         self.calls: list[str] = []
 
-    def fetch(self, ticker: str) -> Fundamentals:
+    def fetch(self, ticker: str, use_llm: bool = True) -> Fundamentals:
         self.calls.append(ticker)
         if ticker.upper() == "NOPE":
             raise TickerNotFoundError("NOPE is not a known Yahoo Finance ticker")
@@ -251,3 +269,72 @@ def test_health_endpoint_reports_the_configuration(client):
     body = response.json()
     assert body["status"] == "ok"
     assert body["ttl_hours"] == pytest.approx(24.0)
+
+
+# ------------------------------------------------------------- analyst fallback
+
+
+def build_client_with_analyst(tmp_path, response: str, fundamentals: Fundamentals):
+    provider = FakeProvider(fundamentals)
+    store = Store(tmp_path / "test.db")
+    analyst = AnalystExtractor(
+        FakeLLM(response), model_label="the analyst model (test)"
+    )
+    service = AnalysisService(
+        store=store, provider=provider, ttl_hours=24, analyst=analyst
+    )
+    return TestClient(create_app(service)), provider
+
+
+def test_the_analyst_fills_a_missing_input_and_the_source_is_reported(tmp_path):
+    gap = SAMPLE.model_copy(
+        update={
+            "roe": None,
+            "field_sources": {**SAMPLE.field_sources, "roe": "unavailable"},
+        }
+    )
+    test_client, _ = build_client_with_analyst(
+        tmp_path, '{"roe": 0.35, "notes": {"roe": "typical for the sector"}}', gap
+    )
+
+    body = test_client.get("/api/analysis/AAPL").json()
+
+    assert body["inputs"]["roe"] == pytest.approx(0.35)
+    assert body["field_sources"]["roe"] == "llm"
+    assert any("roe" in warning for warning in body["warnings"])
+
+
+def test_the_analyst_is_skipped_when_it_is_switched_off(tmp_path):
+    gap = SAMPLE.model_copy(
+        update={
+            "roe": None,
+            "field_sources": {**SAMPLE.field_sources, "roe": "unavailable"},
+        }
+    )
+    test_client, provider = build_client_with_analyst(
+        tmp_path, '{"roe": 0.35}', gap
+    )
+
+    body = test_client.get("/api/analysis/AAPL", params={"use_llm": "false"}).json()
+
+    assert body["inputs"]["roe"] is None
+    assert body["field_sources"]["roe"] == "unavailable"
+
+
+def test_the_analyst_estimates_are_reused_instead_of_being_asked_again(tmp_path):
+    gap = SAMPLE.model_copy(
+        update={
+            "roe": None,
+            "field_sources": {**SAMPLE.field_sources, "roe": "unavailable"},
+        }
+    )
+    test_client, provider = build_client_with_analyst(
+        tmp_path, '{"roe": 0.35}', gap
+    )
+
+    first = test_client.get("/api/analysis/AAPL")
+    second = test_client.get("/api/analysis/AAPL")
+
+    assert first.json()["inputs"]["roe"] == pytest.approx(0.35)
+    assert second.json()["inputs"]["roe"] == pytest.approx(0.35)
+    assert provider.calls == ["AAPL"]

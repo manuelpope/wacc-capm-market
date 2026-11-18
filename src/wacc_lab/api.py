@@ -9,7 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from .config import STATIC_DIR, Settings
 from .db import Store
 from .models import AnalysisResult, Overrides
+from .providers.analyst import AnalystExtractor
 from .providers.base import ProviderError, TickerNotFoundError
+from .providers.llm import LLMConfig, OpenAICompatibleClient
 from .providers.yahoo import YahooProvider
 from .service import AnalysisService
 
@@ -18,7 +20,28 @@ def build_service(settings: Settings | None = None) -> AnalysisService:
     settings = settings or Settings.from_env()
     store = Store(settings.db_path)
     provider = YahooProvider()
-    return AnalysisService(store=store, provider=provider, ttl_hours=settings.ttl_hours)
+
+    analyst: AnalystExtractor | None = None
+    if settings.llm.enabled:
+        client = OpenAICompatibleClient(
+            LLMConfig(
+                base_url=settings.llm.base_url,
+                model=settings.llm.model,
+                api_key=settings.llm.api_key,
+                timeout=settings.llm.timeout,
+                mode=settings.llm.mode,
+            )
+        )
+        analyst = AnalystExtractor(
+            client, model_label=f"the analyst model ({settings.llm.model})"
+        )
+
+    return AnalysisService(
+        store=store,
+        provider=provider,
+        ttl_hours=settings.ttl_hours,
+        analyst=analyst,
+    )
 
 
 def create_app(service: AnalysisService | None = None) -> FastAPI:
@@ -42,6 +65,12 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
             "status": "ok",
             "database": str(settings.db_path),
             "ttl_hours": settings.ttl_hours,
+            "analyst": {
+                "enabled": settings.llm.enabled,
+                "base_url": settings.llm.base_url,
+                "model": settings.llm.model,
+                "mode": settings.llm.mode,
+            },
         }
 
     @app.get("/api/tickers")
@@ -53,27 +82,32 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
     def analysis(
         ticker: str,
         refresh: bool = Query(default=False, description="Recompute from Yahoo"),
+        use_llm: bool = Query(
+            default=True, description="Let the analyst model fill the missing inputs"
+        ),
     ) -> AnalysisResult:
         try:
-            return active_service.analyze(ticker, refresh=refresh)
+            return active_service.analyze(ticker, refresh=refresh, use_llm=use_llm)
         except TickerNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/api/analysis/{ticker}/overrides", response_model=AnalysisResult)
-    def set_overrides(ticker: str, overrides: Overrides) -> AnalysisResult:
+    def set_overrides(
+        ticker: str, overrides: Overrides, use_llm: bool = Query(default=True)
+    ) -> AnalysisResult:
         try:
-            return active_service.set_overrides(ticker, overrides)
+            return active_service.set_overrides(ticker, overrides, use_llm=use_llm)
         except TickerNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.delete("/api/analysis/{ticker}/overrides", response_model=AnalysisResult)
-    def clear_overrides(ticker: str) -> AnalysisResult:
+    def clear_overrides(ticker: str, use_llm: bool = Query(default=True)) -> AnalysisResult:
         try:
-            return active_service.clear_overrides(ticker)
+            return active_service.clear_overrides(ticker, use_llm=use_llm)
         except TickerNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ProviderError as exc:

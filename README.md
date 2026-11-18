@@ -87,12 +87,56 @@ the result lives almost entirely on the perpetuity assumption, and the tool says
 
 ---
 
+## The analyst fallback
+
+When Yahoo Finance cannot supply a number, a local LLM is asked to estimate it.
+
+**What it may touch.** Only five fields, and only when the provider marked them
+as a fallback or as unavailable: the pre-tax cost of debt, the effective tax
+rate, ROE, the retention ratio and the free cash flow margin. A value that
+Yahoo computed is never overwritten.
+
+**What it may not do.** It never estimates a scale: market cap, revenue, share
+count and price always come from Yahoo. The free cash flow is a *margin* the
+model provides, multiplied by the trailing revenue that Yahoo reported. A
+ticker Yahoo does not know is never handed to the model.
+
+**How the answer is validated.** Every value has to land inside a plausible band
+for its field. A value that comes back as a whole percentage (`21`) is
+normalized to a fraction (`0.21`) when the fraction is plausible; otherwise it
+is discarded and reported. A field the model declines (`null`) stays missing. A
+model that fails, times out or answers prose leaves the company exactly as it
+was.
+
+**How you know.** Every value the model writes is labelled `llm` in the
+`field_sources` map, carries a warning, and shows an `LLM` badge in the inputs
+table. The estimates are stored next to the snapshot, so a second request does
+not pay for the model again, and the "Analyst model for missing data" switch
+turns the whole step off.
+
+```bash
+export WACC_LAB_LLM_BASE_URL=http://127.0.0.1:11434/v1   # Ollama, llmlite, llama.cpp, OpenAI
+export WACC_LAB_LLM_MODEL=qwen3.5:9b-mlx
+export WACC_LAB_LLM_API_KEY=                               # only for hosted providers
+export WACC_LAB_LLM_TIMEOUT=180
+export WACC_LAB_LLM_MODE=chat                              # "completions" for llama.cpp servers
+export WACC_LAB_LLM_ENABLED=1
+```
+
+The client speaks the OpenAI-compatible API, so the same code drives Ollama,
+llmlite, llama.cpp and the OpenAI API. Servers built on llama.cpp return the
+answer in `reasoning_content` instead of `content`; that field is used as a
+fallback, and `WACC_LAB_LLM_MODE=completions` switches to the plain
+`/v1/completions` endpoint for those builds.
+
+---
+
 ## API
 
 | Method | Route | What it does |
 |---|---|---|
 | `GET` | `/api/tickers` | The curated universe (69 tickers, grouped by sector) |
-| `GET` | `/api/analysis/{ticker}` | The full analysis; `?refresh=true` forces a recompute |
+| `GET` | `/api/analysis/{ticker}` | The full analysis; `?refresh=true` forces a recompute, `?use_llm=false` skips the analyst |
 | `POST` | `/api/analysis/{ticker}/overrides` | Saves manual inputs and recomputes |
 | `DELETE` | `/api/analysis/{ticker}/overrides` | Drops the overrides and goes back to automatic |
 | `GET` | `/api/health` | Database path and cache TTL |
@@ -194,6 +238,15 @@ This is the honest list. None of these are hidden behind defaults.
 16. **Manual growth is still constrained.** A manual g is not subject to the 5%
     ceiling, but it is forced to keep the minimum spread below the WACC. The
     result reports that it was capped.
+17. **The analyst fallback is a model, not data.** An LLM estimate is a
+    plausible guess based on the sector and the company profile. It is labelled,
+    range-checked and never allowed to overwrite Yahoo, but it is still a guess:
+    treat every `llm` value as an assumption, not as a fact.
+18. **The analyst cannot rescue a broken snapshot.** If Yahoo Finance is
+    unreachable, the request fails with an error instead of quietly serving an
+    invented company. The fallback fills gaps, it does not replace the source.
+19. **The analyst is slow.** A first call pays the model load plus the
+    inference (tens of seconds); the estimate is then cached with the snapshot.
 
 ---
 

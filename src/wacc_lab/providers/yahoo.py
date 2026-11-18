@@ -125,7 +125,7 @@ class YahooProvider:
 
     provider_name = "yahoo"
 
-    def fetch(self, ticker: str) -> Fundamentals:
+    def fetch(self, ticker: str, use_llm: bool = True) -> Fundamentals:
         symbol = ticker.strip().upper()
         if not symbol:
             raise TickerNotFoundError("no ticker was provided")
@@ -198,6 +198,7 @@ class YahooProvider:
             )
 
         fcf_ttm = _recent_sum(_row_series(q_cashflow, CASHFLOW_ROWS["free_cash_flow"]))
+        fcf_source = "yahoo" if fcf_ttm is not None else "unavailable"
         if fcf_ttm is None:
             operating_cf = _recent_sum(
                 _row_series(q_cashflow, CASHFLOW_ROWS["operating_cash_flow"])
@@ -205,6 +206,7 @@ class YahooProvider:
             capex = _recent_sum(_row_series(q_cashflow, CASHFLOW_ROWS["capex"]))
             if operating_cf is not None and capex is not None:
                 fcf_ttm = operating_cf + capex
+                fcf_source = "yahoo_ocf_capex"
 
         dividends_series = _row_series(q_cashflow, CASHFLOW_ROWS["dividends"])
         dividends_ttm = _recent_sum(dividends_series)
@@ -216,19 +218,23 @@ class YahooProvider:
         beta, beta_source = self._beta(symbol, info, risk_free_rate)
         if beta_source == "default":
             warnings.append(
-                "beta is unavailable for this ticker, 1.0 was used as a neutral assumption"
+                "[beta] beta is unavailable for this ticker, 1.0 was used as a neutral assumption"
             )
 
-        tax_rate = self._tax_rate(tax_ttm, pretax_ttm, info, warnings)
-        pretax_cost_of_debt = self._cost_of_debt(
+        tax_rate, tax_source = self._tax_rate(tax_ttm, pretax_ttm, info, warnings)
+        pretax_cost_of_debt, debt_source = self._cost_of_debt(
             interest_ttm, total_debt, risk_free_rate, warnings
         )
         roe = self._roe(net_income_ttm, equity_latest, equity_previous)
+        roe_source = "yahoo" if roe is not None else "unavailable"
 
         retention = self._retention(dividends_ttm, net_income_ttm)
+        retention_source = "yahoo" if retention is not None else "unavailable"
         if retention is None:
             # Some companies ( Berkshire Hathaway ) report no quarterly dividend row.
-            retention, annual_note = self._annual_retention(handle, warnings)
+            retention, annual_note, retention_source = self._annual_retention(
+                handle, warnings
+            )
             if annual_note:
                 warnings.append(annual_note)
 
@@ -258,6 +264,15 @@ class YahooProvider:
             net_income_ttm=net_income_ttm,
             revenue_ttm=revenue_ttm,
             fetched_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            field_sources={
+                "risk_free_rate": "yahoo" if risk_free_rate is not None else "default",
+                "beta": beta_source,
+                "pretax_cost_of_debt": debt_source,
+                "tax_rate": tax_source,
+                "roe": roe_source,
+                "retention_ratio": retention_source,
+                "fcf_ttm": fcf_source,
+            },
             warnings=warnings,
         )
 
@@ -276,9 +291,9 @@ class YahooProvider:
             history = yf.Ticker(RISK_FREE_TICKER).history(period="5d")
             close = history["Close"].dropna()
         except Exception:
-            return None, "the 10-year Treasury yield could not be read, 4.0% was used"
+            return None, "[risk_free_rate] the 10-year Treasury yield could not be read, 4.0% was used"
         if close.empty:
-            return None, "the 10-year Treasury yield could not be read, 4.0% was used"
+            return None, "[risk_free_rate] the 10-year Treasury yield could not be read, 4.0% was used"
         raw = float(close.iloc[-1])
         if raw > 20:  # legacy quoting: 51.0 means 5.10%
             raw = raw / 10.0
@@ -286,7 +301,7 @@ class YahooProvider:
         if not 0.0 < rate < 0.25:
             return (
                 None,
-                "the 10-year Treasury yield is out of range, 4.0% was used",
+                "[risk_free_rate] the 10-year Treasury yield is out of range, 4.0% was used",
             )
         return rate, None
 
@@ -329,18 +344,18 @@ class YahooProvider:
         pretax_ttm: float | None,
         info: dict,
         warnings: list[str],
-    ) -> float:
+    ) -> tuple[float, str]:
         if pretax_ttm and pretax_ttm > 0 and tax_ttm is not None:
             rate = tax_ttm / pretax_ttm
             if 0.0 <= rate <= 1.0:
-                return rate
+                return rate, "yahoo"
         reported = _to_float(info.get("taxRate"))
         if reported is not None and 0.0 <= reported <= 1.0:
-            return reported
+            return reported, "yahoo_reported"
         warnings.append(
-            "the effective tax rate could not be read, 21.0% was used as a default"
+            "[tax_rate] the effective tax rate could not be read, 21.0% was used as a default"
         )
-        return DEFAULT_TAX_RATE
+        return DEFAULT_TAX_RATE, "default"
 
     @staticmethod
     def _cost_of_debt(
@@ -348,15 +363,15 @@ class YahooProvider:
         total_debt: float | None,
         risk_free_rate: float | None,
         warnings: list[str],
-    ) -> float:
+    ) -> tuple[float, str]:
         if interest_ttm and total_debt and total_debt > 0 and interest_ttm > 0:
-            return interest_ttm / total_debt
+            return interest_ttm / total_debt, "yahoo"
         base = risk_free_rate if risk_free_rate is not None else DEFAULT_RISK_FREE_RATE
         warnings.append(
-            "interest expense is unavailable, the cost of debt was estimated as the "
-            "risk-free rate plus 1.5%"
+            "[pretax_cost_of_debt] interest expense is unavailable, the cost of debt was "
+            "estimated as the risk-free rate plus 1.5%"
         )
-        return base + COST_OF_DEBT_SPREAD
+        return base + COST_OF_DEBT_SPREAD, "estimated_rf_plus_spread"
 
     @staticmethod
     def _roe(
@@ -387,7 +402,7 @@ class YahooProvider:
     @staticmethod
     def _annual_retention(
         handle: "yf.Ticker", warnings: list[str]
-    ) -> tuple[float | None, str | None]:
+    ) -> tuple[float | None, str | None, str]:
         """Fallback for tickers without a quarterly dividend row.
 
         Uses the last fiscal year for both dividends and net income, so the
@@ -398,22 +413,32 @@ class YahooProvider:
             annual_cashflow = handle.cashflow
             annual_income = handle.income_stmt
         except Exception:
-            return None, "dividend data is unavailable, g cannot be derived from the retention ratio"
+            return (
+                None,
+                "[retention_ratio] dividend data is unavailable, g cannot be derived from the retention ratio",
+                "unavailable",
+            )
 
         dividends = _value(_row_series(annual_cashflow, CASHFLOW_ROWS["dividends"]), 0)
         net_income = _value(_row_series(annual_income, INCOME_ROWS["net_income"]), 0)
         if net_income is None or net_income <= 0:
-            return None, "dividend data is unavailable, g cannot be derived from the retention ratio"
+            return (
+                None,
+                "[retention_ratio] dividend data is unavailable, g cannot be derived from the retention ratio",
+                "unavailable",
+            )
         if dividends is None:
             # No dividend line at all: the company does not report dividends, so
             # assume it pays none and the whole profit is retained.
             warnings.append(
-                "no dividend line is reported, the retention ratio was set to 1.0 assuming no dividends are paid"
+                "[retention_ratio] no dividend line is reported, the retention ratio was set "
+                "to 1.0 assuming no dividends are paid"
             )
-            return 1.0, None
+            return 1.0, None, "assumed_no_dividends"
 
         retention = min(max(1.0 - abs(dividends) / net_income, 0.0), 1.0)
         warnings.append(
-            "the retention ratio uses the last fiscal year because quarterly dividends are not reported"
+            "[retention_ratio] the retention ratio uses the last fiscal year because "
+            "quarterly dividends are not reported"
         )
-        return retention, None
+        return retention, None, "yahoo_annual"

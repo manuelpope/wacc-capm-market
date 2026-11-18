@@ -95,6 +95,7 @@ function renderInputs(analysis) {
   const body = $("inputs-body");
   body.innerHTML = "";
   const overrides = analysis.overrides || {};
+  const sources = analysis.field_sources || {};
 
   for (const field of OVERRIDE_FIELDS) {
     const row = document.createElement("tr");
@@ -104,6 +105,13 @@ function renderInputs(analysis) {
     const automatic = document.createElement("td");
     const autoValue = field.auto(analysis);
     automatic.textContent = field.percent ? pct(autoValue) : autoValue ?? "—";
+    if (sources[field.key] === "llm") {
+      const badge = document.createElement("span");
+      badge.className = "badge-llm";
+      badge.textContent = "llm";
+      badge.title = "this value was estimated by the analyst model, not read from Yahoo Finance";
+      automatic.appendChild(badge);
+    }
 
     const overrideCell = document.createElement("td");
     const input = document.createElement("input");
@@ -233,7 +241,8 @@ async function analyze(ticker, refresh = false) {
   $("refresh-btn").disabled = true;
   setStatus(`Loading ${symbol} from Yahoo Finance…`);
   try {
-    const query = refresh ? "?refresh=true" : "";
+    const useLlm = $("llm-toggle").checked;
+    const query = refresh ? `?refresh=true&use_llm=${useLlm}` : `?use_llm=${useLlm}`;
     const analysis = await request(`/api/analysis/${encodeURIComponent(symbol)}${query}`);
     render(analysis);
   } catch (err) {
@@ -257,7 +266,8 @@ async function saveOverrides() {
   }
   $("save-btn").disabled = true;
   try {
-    const analysis = await request(`/api/analysis/${encodeURIComponent(state.ticker)}/overrides`, {
+    const useLlm = $("llm-toggle").checked;
+    const analysis = await request(`/api/analysis/${encodeURIComponent(state.ticker)}/overrides?use_llm=${useLlm}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -274,7 +284,8 @@ async function resetOverrides() {
   if (!state.ticker) return;
   $("reset-btn").disabled = true;
   try {
-    const analysis = await request(`/api/analysis/${encodeURIComponent(state.ticker)}/overrides`, {
+    const useLlm = $("llm-toggle").checked;
+    const analysis = await request(`/api/analysis/${encodeURIComponent(state.ticker)}/overrides?use_llm=${useLlm}`, {
       method: "DELETE"
     });
     render(analysis);
