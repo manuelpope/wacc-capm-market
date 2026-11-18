@@ -105,20 +105,30 @@ def _value(series: pd.Series | None, position: int = 0) -> float | None:
 
 
 def _recent_sum(series: pd.Series | None, periods: int = 4) -> float | None:
+    value, _ = _ttm(series, periods)
+    return value
+
+
+def _ttm(series: pd.Series | None, periods: int = 4) -> tuple[float | None, int]:
+    """The trailing twelve months and how many quarters went into it.
+
+    Some companies do not report four quarters; a sum of fewer is not a year
+    and the caller has to say so.
+    """
     if series is None:
-        return None
+        return None, 0
     values: list[float] = []
     try:
         chunk = series.iloc[:periods]
     except Exception:
-        return None
+        return None, 0
     for raw in chunk:
         number = _to_float(raw)
         if number is not None:
             values.append(number)
     if len(values) < 2:
-        return None
-    return sum(values)
+        return None, len(values)
+    return sum(values), len(values)
 
 
 class YahooProvider:
@@ -186,11 +196,13 @@ class YahooProvider:
             equity_latest = _value(equity_series, 0)
             equity_previous = None
 
-        net_income_ttm = _recent_sum(_row_series(q_income, INCOME_ROWS["net_income"]))
-        pretax_ttm = _recent_sum(_row_series(q_income, INCOME_ROWS["pretax_income"]))
-        tax_ttm = _recent_sum(_row_series(q_income, INCOME_ROWS["tax_provision"]))
-        revenue_ttm = _recent_sum(_row_series(q_income, INCOME_ROWS["revenue"]))
-        interest_ttm = _recent_sum(
+        net_income_ttm, quarters_income = _ttm(
+            _row_series(q_income, INCOME_ROWS["net_income"])
+        )
+        pretax_ttm, _ = _ttm(_row_series(q_income, INCOME_ROWS["pretax_income"]))
+        tax_ttm, _ = _ttm(_row_series(q_income, INCOME_ROWS["tax_provision"]))
+        revenue_ttm, _ = _ttm(_row_series(q_income, INCOME_ROWS["revenue"]))
+        interest_ttm, quarters_interest = _ttm(
             _row_series(q_income, INCOME_ROWS["interest_expense"])
         )
         if interest_ttm is None:
@@ -199,7 +211,9 @@ class YahooProvider:
                 _row_series(a_income, INCOME_ROWS["interest_expense"]), 0
             )
 
-        fcf_ttm = _recent_sum(_row_series(q_cashflow, CASHFLOW_ROWS["free_cash_flow"]))
+        fcf_ttm, quarters_cash = _ttm(
+            _row_series(q_cashflow, CASHFLOW_ROWS["free_cash_flow"])
+        )
         fcf_source = "yahoo" if fcf_ttm is not None else "unavailable"
         if fcf_ttm is None:
             operating_cf = _recent_sum(
@@ -228,7 +242,20 @@ class YahooProvider:
             fcf_normalized_source = "yahoo_annual"
 
         dividends_series = _row_series(q_cashflow, CASHFLOW_ROWS["dividends"])
-        dividends_ttm = _recent_sum(dividends_series)
+        dividends_ttm, _ = _ttm(dividends_series)
+
+        short_quarters = sorted(
+            {
+                count
+                for count in (quarters_income, quarters_interest, quarters_cash)
+                if 0 < count < 4
+            }
+        )
+        if short_quarters:
+            warnings.append(
+                f"only {short_quarters[0]} quarters of statements are reported for this "
+                "company, the trailing figures are shorter than a year"
+            )
 
         risk_free_rate, rf_warning = self._risk_free_rate()
         if rf_warning:

@@ -81,7 +81,10 @@ def compute_valuation(inputs: ValuationInputs) -> ValuationResult:
     else:
         warnings.append("shares outstanding are unavailable, value per share was not computed")
 
-    terminal_value_share = pv_terminal / enterprise_value if enterprise_value else 0.0
+    # The share only means something when the enterprise value is positive.
+    terminal_value_share = (
+        pv_terminal / enterprise_value if enterprise_value > 0 else 0.0
+    )
     if terminal_value_share > 0.85:
         warnings.append(
             f"the terminal value is {terminal_value_share:.0%} of the enterprise value, "

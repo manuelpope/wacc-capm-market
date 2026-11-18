@@ -1,4 +1,4 @@
-const state = { ticker: null, analysis: null };
+const state = { ticker: null, analysis: null, requestId: 0 };
 
 const OVERRIDE_FIELDS = [
   { key: "beta", label: "Beta", auto: (a) => a.inputs.beta, step: "0.01" },
@@ -7,7 +7,7 @@ const OVERRIDE_FIELDS = [
   { key: "pretax_cost_of_debt", label: "Pre-tax cost of debt (%)", auto: (a) => a.inputs.pretax_cost_of_debt, percent: true, step: "0.01" },
   { key: "tax_rate", label: "Tax rate (%)", auto: (a) => a.inputs.tax_rate, percent: true, step: "0.01" },
   { key: "debt_weight", label: "Debt weight (%)", auto: (a) => a.inputs.debt_weight, percent: true, step: "0.01" },
-  { key: "growth_rate", label: "Growth g (%)", auto: (a) => a.growth.raw_growth, percent: true, step: "0.01" },
+  { key: "growth_rate", label: "Growth g (%)", auto: (a) => a.growth.growth, percent: true, step: "0.01" },
   { key: "base_fcf", label: "Base free cash flow (normalized)", auto: (a) => a.inputs.base_fcf, step: "1" },
   { key: "projection_years", label: "Projection horizon (years)", auto: () => 5, step: "1" }
 ];
@@ -37,6 +37,9 @@ function money(value, currency) {
   if (abs >= 1e12) return `${prefix}${(value / 1e12).toFixed(2)}T`;
   if (abs >= 1e9) return `${prefix}${(value / 1e9).toFixed(2)}B`;
   if (abs >= 1e6) return `${prefix}${(value / 1e6).toFixed(2)}M`;
+  if (abs < 1000) {
+    return `${prefix}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  }
   return `${prefix}${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
@@ -164,10 +167,13 @@ function renderSensitivity(grid) {
   legend.innerHTML = "";
 
   if (!grid || !grid.cells || !grid.cells.length) {
-    host.innerHTML = `<p class="news-empty">${
+    const message = document.createElement("p");
+    message.className = "news-empty";
+    message.textContent =
       (grid && grid.warnings && grid.warnings[0]) ||
-      "The grid is not available for this company."
-    }</p>`;
+      "The grid is not available for this company.";
+    host.innerHTML = "";
+    host.appendChild(message);
     return;
   }
 
@@ -257,7 +263,11 @@ async function loadSensitivity(ticker, useLlm) {
     );
     renderSensitivity(grid);
   } catch (err) {
-    host.innerHTML = `<p class="news-empty">${err.message}</p>`;
+    const message = document.createElement("p");
+    message.className = "news-empty";
+    message.textContent = err.message;
+    host.innerHTML = "";
+    host.appendChild(message);
   }
 }
 
@@ -416,6 +426,8 @@ async function analyze(ticker, refresh = false) {
     return;
   }
   state.ticker = symbol;
+  state.requestId += 1;
+  const requestId = state.requestId;
   window.localStorage.setItem("wacc-lab-ticker", symbol);
   $("load-btn").disabled = true;
   $("refresh-btn").disabled = true;
@@ -424,6 +436,7 @@ async function analyze(ticker, refresh = false) {
     const useLlm = $("llm-toggle").checked;
     const query = refresh ? `?refresh=true&use_llm=${useLlm}` : `?use_llm=${useLlm}`;
     const analysis = await request(`/api/analysis/${encodeURIComponent(symbol)}${query}`);
+    if (requestId !== state.requestId) return;  // a newer request won
     render(analysis);
     loadSensitivity(symbol, useLlm);
   } catch (err) {
@@ -437,13 +450,29 @@ async function analyze(ticker, refresh = false) {
 async function saveOverrides() {
   if (!state.ticker) return;
   const payload = {};
+  const rejected = [];
   for (const input of document.querySelectorAll("#inputs-body input")) {
+    if (input.validity && input.validity.badInput) {
+      rejected.push(input.dataset.key);
+      continue;
+    }
     const raw = input.value.trim();
     if (raw === "") continue;
     let value = Number(raw);
-    if (!Number.isFinite(value)) continue;
+    if (!Number.isFinite(value)) {
+      rejected.push(input.dataset.key);
+      continue;
+    }
     if (input.dataset.percent === "1") value = value / 100;
     payload[input.dataset.key] = value;
+  }
+  if (rejected.length) {
+    setStatus(
+      `These overrides were ignored because the value could not be read: ${rejected.join(", ")}. ` +
+        "Use a dot for the decimal separator.",
+      "error"
+    );
+    return;
   }
   $("save-btn").disabled = true;
   try {

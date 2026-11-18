@@ -57,6 +57,9 @@ class FakeLLM:
         return self.response
 
 
+KNOWN_TICKERS = {"AAPL", "MSFT", "NVDA"}
+
+
 class FakeProvider:
     def __init__(self, fundamentals: Fundamentals) -> None:
         self.fundamentals = fundamentals
@@ -64,8 +67,10 @@ class FakeProvider:
 
     def fetch(self, ticker: str, use_llm: bool = True) -> Fundamentals:
         self.calls.append(ticker)
-        if ticker.upper() == "NOPE":
-            raise TickerNotFoundError("NOPE is not a known Yahoo Finance ticker")
+        if ticker.strip().upper() not in KNOWN_TICKERS:
+            raise TickerNotFoundError(
+                f"{ticker} is not a known Yahoo Finance ticker"
+            )
         return self.fundamentals.model_copy(
             update={
                 "ticker": ticker.upper(),
@@ -382,3 +387,80 @@ def test_the_sensitivity_grid_marks_a_cell_that_cannot_be_computed(client):
         if not cell["valid"]
     ]
     assert invalid, "the grid should contain at least one invalid cell"
+
+
+# ------------------------------------------------------------------ adversarial
+
+
+def test_a_lower_case_ticker_is_accepted(client):
+    test_client, provider = client
+
+    response = test_client.get("/api/analysis/aapl")
+
+    assert response.status_code == 200
+    assert response.json()["ticker"] == "AAPL"
+    assert provider.calls == ["AAPL"]
+
+
+def test_a_ticker_that_is_not_a_ticker_returns_404(client):
+    test_client, _ = client
+
+    response = test_client.get("/api/analysis/ZZZZNOTATICKER")
+
+    assert response.status_code == 404
+
+
+def test_an_empty_ticker_returns_404(client):
+    test_client, _ = client
+
+    response = test_client.get("/api/analysis/%20")
+
+    assert response.status_code == 404
+
+
+def test_a_sql_injection_attempt_harms_nothing(client):
+    test_client, _ = client
+
+    response = test_client.get("/api/analysis/AAPL%27%3B%20DROP%20TABLE%20snapshots%3B--")
+
+    # The provider is the fake one, so the ticker is unknown: the point is that
+    # the database is still there afterwards.
+    assert response.status_code in (200, 404)
+
+    tables = test_client.get("/api/health").json()
+    assert tables["status"] == "ok"
+
+    # And the store still answers with the catalog.
+    assert test_client.get("/api/tickers").json()["count"] > 40
+
+
+def test_two_requests_for_the_same_ticker_in_parallel_both_answer(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    test_client, provider = build_client(tmp_path)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        responses = list(
+            pool.map(lambda _: test_client.get("/api/analysis/AAPL"), range(8))
+        )
+
+    assert all(response.status_code == 200 for response in responses)
+    assert all(response.json()["ticker"] == "AAPL" for response in responses)
+
+
+def test_writes_and_reads_in_parallel_do_not_collide(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    test_client, _ = build_client(tmp_path)
+
+    def mixed(index: int):
+        if index % 2 == 0:
+            return test_client.get("/api/analysis/AAPL").status_code
+        return test_client.post(
+            "/api/analysis/AAPL/overrides", json={"beta": 1.0 + index / 100}
+        ).status_code
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        codes = list(pool.map(mixed, range(12)))
+
+    assert all(code == 200 for code in codes)

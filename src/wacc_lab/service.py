@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .db import Store
+from .db import Store, utcnow_iso
 from .engine.growth import GrowthInputs, apply_growth_caps, compute_growth
 from .engine.sensitivity import DEFAULT_SPAN, DEFAULT_STEP, compute_sensitivity
 from .engine.valuation import ValuationInputs, compute_valuation
@@ -63,8 +63,7 @@ class AnalysisService:
             fundamentals = self._analyst_step(symbol, fundamentals, news)
         overrides = self.store.get_overrides(symbol)
         result = self._build(symbol, fundamentals, overrides, status, news)
-        computed_at = self.store.save_analysis(symbol, result.model_dump(mode="json"))
-        result.cache.computed_at = computed_at
+        result.cache.computed_at = utcnow_iso()
         return result
 
     def set_overrides(
@@ -479,11 +478,18 @@ class AnalysisService:
             ) / abs(fundamentals.fcf_ttm)
             if abs(difference) > 0.25:
                 direction = "above" if difference > 0 else "below"
+                extreme = ""
+                if abs(difference) > 0.5:
+                    extreme = (
+                        " The trailing figure looks like a cycle extreme, so the "
+                        "normalized base is the one to question."
+                    )
                 warnings.append(
                     f"the normalized free cash flow "
                     f"({fundamentals.fcf_years} years, {fundamentals.fcf_normalized:,.0f}) is "
                     f"{abs(difference):.0%} {direction} the trailing twelve months "
-                    f"({fundamentals.fcf_ttm:,.0f}), the valuation uses the normalized one"
+                    f"({fundamentals.fcf_ttm:,.0f}), the valuation uses the normalized one."
+                    f"{extreme}"
                 )
         years = overrides.projection_years or DEFAULT_PROJECTION_YEARS
         if base_fcf is None:

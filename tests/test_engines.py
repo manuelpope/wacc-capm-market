@@ -268,3 +268,19 @@ def test_valuation_uses_math_isclose_for_terminal_value():
     expected_tv = expected_fcf * 1.05 / (0.10 - 0.05)
     assert math.isclose(result.terminal_value, expected_tv, rel_tol=1e-12)
     assert math.isclose(result.enterprise_value, expected_fcf / 1.1 + expected_tv / 1.1)
+
+
+def test_the_terminal_value_share_is_zero_when_the_enterprise_value_is_negative():
+    result = compute_valuation(
+        ValuationInputs(
+            base_fcf=-50.0,
+            growth_rate=0.02,
+            wacc=0.09,
+            years=5,
+            net_debt=0.0,
+            shares_outstanding=10.0,
+        )
+    )
+
+    assert result.enterprise_value < 0
+    assert result.terminal_value_share == pytest.approx(0.0)

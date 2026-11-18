@@ -35,6 +35,11 @@ S7. "cuando no este disponible calcular los valores por alguna razon , usar un e
     Acceptance: `?use_llm=false` returns the exact Yahoo values; `?use_llm=true` fills only the gaps; a model failure leaves the company untouched.
     Checks: `uv run pytest tests/test_llm.py tests/test_api.py -k analyst`
 
+S11. "sigue intentando"
+    Scope: A second review pass over the parts of the code the first one did not cover: the interface script, the edge cases of the engines, the concurrency of the store, and the inputs the user can actually type.
+    Acceptance: The known defects of the second pass are fixed and pinned with a test, and the inputs that come from the user or from the network are covered.
+    Checks: `uv run pytest -q`
+
 S10. "arregla el punto de fcf normalizado y luego revisa el codigo para no tener bugs"
     Scope: The valuation base becomes the average of the last three fiscal years instead of the trailing twelve months, with both figures shown and a warning when they differ by more than 25%. Then a review pass over the whole code base.
     Acceptance: The base cash flow is the three year average, the trailing figure stays visible, and the review leaves no known defect behind.
@@ -66,6 +71,7 @@ T6 | S7 | inline | done | analyst extractor: OpenAI-compatible client, range val
 T7 | S8 | inline | done | news provider + relevance ranking, prompt context, currency formatting, news card
 T8 | S9 | inline | done | sensitivity engine, endpoint, grid card with the colour scale and the fragile marks
 T9 | S10 | inline | done | normalization engine, provider series, valuation base, UI rows, bug review
+T10 | S11 | inline | done | second review: interface script, engine edge cases, store concurrency, hostile inputs
 
 ## Log
 
@@ -135,3 +141,19 @@ L19 (2026-11-18): Review pass. Ten defects found and fixed, each one pinned with
 10. The grid stayed stale after saving or resetting an override, and the provider downloaded the annual cash flow statement twice.
 
 L20 (2026-11-18): The same kind of mistake appeared in the tooling itself twice: two patches did not apply because the anchor text had changed, and both were caught only by running the code afterwards. Every patch in this increment is verified against the real behaviour, not against the diff.
+
+L21 (2026-11-18): Second review pass, on the parts the first one did not cover. Ten more defects fixed:
+1. Two XSS holes in the interface: the error message and the grid warning were injected as raw HTML. Both are text now.
+2. The "automatic" value of the growth override showed the raw growth (106% for Apple) instead of the growth the model used (5%).
+3. A race in the interface: two requests could arrive out of order and the older answer overwrote the newer one.
+4. An override typed with a comma decimal was ignored without a word. The interface now says which fields it could not read.
+5. Amounts under a thousand were rounded to zero.
+6. The axes of the grid were rounded to six decimals, so the base cell was not exactly the valuation shown above it. The rounding is gone.
+7. "database is locked" under concurrent requests: the journal mode pragma was executed on every connection and needs an exclusive lock that the busy timeout does not wait for. It is set once, when the schema is created.
+8. A trailing figure made of fewer than four quarters was presented as a year. The provider now counts the quarters and says so.
+9. The share of the terminal value was computed over a negative enterprise value, where the ratio means nothing.
+10. The `analyses` table was written on every request and never read: the snapshot is the cache. The table is gone.
+
+L22 (2026-11-18): One suspicion turned out not to be a defect. Samsung's trailing cash flow looked four times its annual figure, which is the signature of cumulative quarters. The quarterly statements were checked against the annual ones for four companies: the quarters are discrete (Apple's four quarters sum to 478.9 against an annual 478.8), so the trailing figure was right. The gap is real: Samsung's 2026 is a cycle extreme and the three year average includes a negative 2023. The tool says so, and now the warning names the cycle when the difference is extreme.
+
+L23 (2026-11-18): The second pass added the kind of tests that were missing: property tests over the engines with seeded random inputs (the invariants hold for every input: the growth never reaches the discount rate, the value falls when the discount rate rises and rises when growth rises, nothing is ever a NaN, the base cell of the grid is the valuation), hostile inputs against the API (a SQL injection attempt, an empty ticker, a lowercase ticker, eight parallel requests, and parallel reads and writes), and a test for the store that proves the database file is not touched at import.

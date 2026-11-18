@@ -22,12 +22,6 @@ CREATE TABLE IF NOT EXISTS snapshots (
     payload     TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS analyses (
-    ticker       TEXT PRIMARY KEY,
-    computed_at  TEXT NOT NULL,
-    payload      TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS overrides (
     ticker      TEXT PRIMARY KEY,
     updated_at  TEXT NOT NULL,
@@ -93,7 +87,9 @@ class Store:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=15)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        # The application answers from a thread pool: two requests can write
+        # at the same time and SQLite would refuse the second one.
+        conn.execute("PRAGMA busy_timeout=10000")
         self._ensure_schema(conn)
         return conn
 
@@ -109,6 +105,14 @@ class Store:
             if self._ready:
                 return
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                # The journal mode is a property of the file, so it is set
+                # once. Changing it needs an exclusive lock, which the busy
+                # timeout does not wait for, so a concurrent request would
+                # fail with "database is locked".
+                conn.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError:
+                pass
             conn.executescript(SCHEMA)
             now = utcnow_iso()
             rows = [
@@ -169,25 +173,6 @@ class Store:
             return None
         fetched = datetime.fromisoformat(row["fetched_at"])
         return (datetime.now(timezone.utc) - fetched).total_seconds() / 3600.0
-
-    # -------------------------------------------------------------- analyses
-    def save_analysis(self, ticker: str, payload: dict[str, Any]) -> str:
-        computed_at = utcnow_iso()
-        with self._session() as conn:
-            conn.execute(
-                "INSERT INTO analyses (ticker, computed_at, payload) VALUES (?, ?, ?) "
-                "ON CONFLICT(ticker) DO UPDATE SET computed_at=excluded.computed_at, "
-                "payload=excluded.payload",
-                (ticker, computed_at, json.dumps(payload)),
-            )
-        return computed_at
-
-    def get_analysis(self, ticker: str) -> dict[str, Any] | None:
-        with self._session() as conn:
-            row = conn.execute(
-                "SELECT payload FROM analyses WHERE ticker = ?", (ticker,)
-            ).fetchone()
-        return json.loads(row["payload"]) if row else None
 
     # ------------------------------------------------------------- overrides
     def save_overrides(self, ticker: str, overrides: Overrides) -> str:

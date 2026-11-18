@@ -249,8 +249,9 @@ One SQLite file (`data/wacc_lab.db`) with four tables:
 | Table | Content |
 |---|---|
 | `snapshots` | The raw fundamentals per ticker, with the fetch timestamp |
-| `analyses` | The latest computed analysis per ticker |
 | `overrides` | The manual inputs per ticker |
+| `llm_estimates` | What the analyst model estimated, next to the snapshot it belongs to |
+| `news` | The headlines, with the timestamp of the fetch |
 | `universe` | The curated ticker catalog |
 
 Cache behaviour:

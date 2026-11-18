@@ -54,3 +54,38 @@ def test_a_zero_is_a_valid_figure_and_not_a_missing_one():
 
     assert years == 3
     assert value == pytest.approx((0.0 + 120.0 + 136.0) / 3)
+
+
+def test_the_trailing_figure_reports_how_many_quarters_went_into_it():
+    import pandas as pd
+
+    from wacc_lab.providers.yahoo import _ttm
+
+    series = pd.Series([10.0, 20.0, 30.0, 40.0, 50.0])
+
+    value, quarters = _ttm(series)
+
+    assert value == pytest.approx(100.0)
+    assert quarters == 4
+
+
+def test_a_short_series_reports_fewer_quarters():
+    import pandas as pd
+
+    from wacc_lab.providers.yahoo import _ttm
+
+    series = pd.Series([10.0, 20.0, None, None])
+
+    value, quarters = _ttm(series)
+
+    assert value == pytest.approx(30.0)
+    assert quarters == 2
+
+
+def test_no_series_is_no_value_and_no_quarters():
+    from wacc_lab.providers.yahoo import _ttm
+
+    value, quarters = _ttm(None)
+
+    assert value is None
+    assert quarters == 0

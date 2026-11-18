@@ -45,8 +45,9 @@ class SensitivityGrid:
 
 def _axis(base: float, span: float, step: float) -> list[float]:
     half = int(round(span / step))
-    # Rounded so the labels do not show floating point noise.
-    return [round(base + offset * step, 6) for offset in range(-half, half + 1)]
+    # The values are not rounded: the base of the axis has to be exactly the
+    # base of the valuation, so that the base cell is that valuation.
+    return [base + offset * step for offset in range(-half, half + 1)]
 
 
 def compute_sensitivity(
@@ -66,8 +67,8 @@ def compute_sensitivity(
 
     wacc_axis = _axis(base_wacc, span, step)
     g_axis = _axis(base_growth, span, step)
-    base_row = g_axis.index(round(base_growth, 6))
-    base_column = wacc_axis.index(round(base_wacc, 6))
+    base_row = len(g_axis) // 2
+    base_column = len(wacc_axis) // 2
 
     warnings: list[str] = []
     if base_fcf <= 0:
