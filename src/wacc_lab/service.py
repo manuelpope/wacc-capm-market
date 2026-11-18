@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .db import Store
-from .engine.growth import DEFAULT_MAX_WACC_SPREAD, GrowthInputs, compute_growth
+from .engine.growth import GrowthInputs, apply_growth_caps, compute_growth
 from .engine.valuation import ValuationInputs, compute_valuation
 from .engine.wacc import DEFAULT_EQUITY_RISK_PREMIUM, WaccInputs, compute_wacc
 from .models import (
@@ -245,22 +245,16 @@ class AnalysisService:
     ) -> GrowthBreakdown:
         if overrides.growth_rate is not None:
             manual = overrides.growth_rate
-            capped = False
-            reason = None
-            growth = manual
-            if manual >= wacc:
-                growth = wacc - DEFAULT_MAX_WACC_SPREAD
-                capped = True
-                reason = "the manual growth rate was forced below the WACC"
-                warnings.append(
-                    "the manual growth rate is above the WACC and was capped to keep the terminal value finite"
-                )
+            growth, reasons, growth_warnings = apply_growth_caps(
+                manual, wacc=wacc, ceiling=None
+            )
+            warnings.extend(growth_warnings)
             return GrowthBreakdown(
                 method="manual",
                 raw_growth=manual,
                 growth=growth,
-                capped=capped,
-                reason=reason,
+                capped=bool(reasons),
+                reason="; ".join(reasons) if reasons else None,
                 manual=True,
             )
 
@@ -329,6 +323,7 @@ class AnalysisService:
             enterprise_value=result.enterprise_value,
             net_debt=fundamentals.net_debt,
             equity_value=result.equity_value,
+            terminal_value_share=result.terminal_value_share,
             value_per_share=result.value_per_share,
             upside_pct=result.upside_pct,
         )

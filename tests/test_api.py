@@ -132,7 +132,7 @@ def test_wacc_decomposition_matches_the_sample_numbers(client):
     assert wacc["wacc"] == pytest.approx(0.8 * 0.10 + 0.2 * 0.045)
 
 
-def test_growth_is_capped_strictly_below_the_wacc(client):
+def test_growth_is_capped_at_the_ceiling_and_stays_below_the_wacc(client):
     test_client, _ = client
 
     body = test_client.get("/api/analysis/AAPL").json()
@@ -140,8 +140,8 @@ def test_growth_is_capped_strictly_below_the_wacc(client):
 
     assert growth["raw_growth"] == pytest.approx(0.10)
     assert growth["capped"] is True
+    assert growth["growth"] == pytest.approx(0.05)
     assert growth["growth"] < body["wacc"]["wacc"]
-    assert growth["growth"] == pytest.approx(body["wacc"]["wacc"] - 0.015)
 
 
 def test_valuation_is_consistent_with_the_wacc_and_growth(client):
@@ -163,6 +163,9 @@ def test_valuation_is_consistent_with_the_wacc_and_growth(client):
     )
     assert valuation["upside_pct"] == pytest.approx(
         (valuation["value_per_share"] - 40.0) / 40.0
+    )
+    assert valuation["terminal_value_share"] == pytest.approx(
+        valuation["pv_terminal"] / valuation["enterprise_value"]
     )
 
 
@@ -207,6 +210,18 @@ def test_a_manual_growth_rate_is_capped_below_the_wacc(client):
     assert body["growth"]["manual"] is True
     assert body["growth"]["capped"] is True
     assert body["growth"]["growth"] < body["wacc"]["wacc"]
+
+
+def test_a_manual_growth_rate_keeps_the_minimum_spread_below_the_wacc(client):
+    test_client, _ = client
+
+    body = test_client.post(
+        "/api/analysis/AAPL/overrides", json={"growth_rate": 0.065}
+    ).json()
+
+    assert body["growth"]["manual"] is True
+    assert body["growth"]["capped"] is True
+    assert body["growth"]["growth"] == pytest.approx(body["wacc"]["wacc"] - 0.03)
 
 
 def test_an_unknown_ticker_returns_404(client):

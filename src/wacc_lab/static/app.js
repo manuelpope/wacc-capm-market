@@ -184,6 +184,7 @@ function render(analysis) {
     setText("val-tv", money(valuation.terminal_value));
     setText("val-pv-tv", money(valuation.pv_terminal));
     setText("val-ev", money(valuation.enterprise_value));
+    setText("val-tv-share", pct(valuation.terminal_value_share, 1));
     setText("val-net-debt", money(valuation.net_debt));
     setText("val-equity", money(valuation.equity_value));
     setText("val-per-share", valuation.value_per_share ? valuation.value_per_share.toFixed(2) : "—");
@@ -201,7 +202,7 @@ function render(analysis) {
       .join("  ·  ");
     setText("val-projection", projection);
   } else {
-    ["val-fcf", "val-years", "val-pv-explicit", "val-tv", "val-pv-tv", "val-ev", "val-net-debt", "val-equity", "val-per-share", "val-price", "val-upside", "val-projection"].forEach((id) => setText(id, "—"));
+    ["val-fcf", "val-years", "val-pv-explicit", "val-tv", "val-pv-tv", "val-ev", "val-tv-share", "val-net-debt", "val-equity", "val-per-share", "val-price", "val-upside", "val-projection"].forEach((id) => setText(id, "—"));
   }
 
   renderInputs(analysis);

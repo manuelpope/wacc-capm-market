@@ -3,17 +3,23 @@
 Default method: sustainable internal growth, g = ROE * retention ratio.
 
 The raw figure is almost always unusable on its own (buybacks inflate ROE), so
-the result is capped twice: first at a growth ceiling, then strictly below the
-WACC, because a perpetual growth rate at or above the discount rate makes the
-terminal value diverge.
+the result is capped before it reaches the valuation:
+
+* at a growth ceiling, because a perpetual growth rate above long-run nominal
+  GDP is not sustainable;
+* and so that the spread between the WACC and g stays wide enough for the
+  Gordon denominator (WACC - g) to mean something.
+
+Both caps report why they fired. A manual growth rate goes through the same
+spread rule, but is not subject to the ceiling.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-DEFAULT_GROWTH_CEILING = 0.10
-DEFAULT_MAX_WACC_SPREAD = 0.015
+DEFAULT_GROWTH_CEILING = 0.05
+DEFAULT_MAX_WACC_SPREAD = 0.03
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,56 @@ class GrowthResult:
     capped: bool
     reason: str | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+def apply_growth_caps(
+    raw_growth: float,
+    wacc: float,
+    ceiling: float | None = None,
+    max_wacc_spread: float = DEFAULT_MAX_WACC_SPREAD,
+) -> tuple[float, list[str], list[str]]:
+    """Apply the ceiling and the minimum-spread rule.
+
+    Returns (growth, reasons, warnings). The reasons explain every cap that
+    fired, so the UI can show why the number moved.
+    """
+    reasons: list[str] = []
+    warnings: list[str] = []
+    growth = raw_growth
+
+    if ceiling is not None and raw_growth > ceiling:
+        growth = ceiling
+        reasons.append(f"capped at the {ceiling:.1%} growth ceiling")
+        warnings.append(
+            f"raw growth {raw_growth:.1%} exceeds the ceiling, the ROE is likely inflated by buybacks"
+        )
+
+    if wacc <= 0:
+        reasons.append("the WACC is not positive, g was set to 0")
+        return 0.0, reasons, warnings
+
+    spread = wacc - growth
+    if growth >= wacc:
+        reasons.append("capped to stay strictly below the WACC")
+        growth = wacc - max_wacc_spread
+        warnings.append(
+            "growth was forced below the WACC, the terminal value is highly sensitive to this cap"
+        )
+    elif spread < max_wacc_spread:
+        reasons.append(
+            f"capped to keep at least {max_wacc_spread:.1%} between the WACC and g"
+        )
+        growth = wacc - max_wacc_spread
+        warnings.append(
+            f"the WACC and g were only {spread:.1%} apart, which inflates the terminal "
+            "value, so g was reduced"
+        )
+
+    if growth < 0:
+        growth = 0.0
+        reasons.append("the WACC is below the minimum spread, g was set to 0")
+
+    return growth, reasons, warnings
 
 
 def compute_growth(inputs: GrowthInputs) -> GrowthResult:
@@ -61,25 +117,12 @@ def compute_growth(inputs: GrowthInputs) -> GrowthResult:
         )
 
     raw_growth = inputs.roe * inputs.retention_ratio
-    growth = raw_growth
-    reasons: list[str] = []
-    warnings: list[str] = []
-
-    if raw_growth > inputs.ceiling:
-        growth = inputs.ceiling
-        reasons.append(f"capped at the {inputs.ceiling:.1%} growth ceiling")
-        warnings.append(
-            f"raw growth {raw_growth:.1%} exceeds the ceiling, the ROE is likely inflated by buybacks"
-        )
-
-    if growth >= inputs.wacc:
-        growth = inputs.wacc - inputs.max_wacc_spread
-        reasons.append(
-            f"capped at WACC minus {inputs.max_wacc_spread:.1%} to stay strictly below the discount rate"
-        )
-        warnings.append(
-            "growth was forced below the WACC, the terminal value is highly sensitive to this cap"
-        )
+    growth, reasons, warnings = apply_growth_caps(
+        raw_growth,
+        wacc=inputs.wacc,
+        ceiling=inputs.ceiling,
+        max_wacc_spread=inputs.max_wacc_spread,
+    )
 
     return GrowthResult(
         raw_growth=raw_growth,

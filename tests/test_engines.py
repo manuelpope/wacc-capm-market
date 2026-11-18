@@ -85,25 +85,48 @@ def test_wacc_flags_a_cost_of_equity_above_twenty_five_percent():
 
 def test_growth_uses_roe_times_retention_when_below_wacc():
     result = compute_growth(
-        GrowthInputs(roe=0.20, retention_ratio=0.25, wacc=0.0765)
+        GrowthInputs(roe=0.20, retention_ratio=0.20, wacc=0.0765)
     )
 
-    assert result.raw_growth == pytest.approx(0.05)
-    assert result.growth == pytest.approx(0.05)
+    assert result.raw_growth == pytest.approx(0.04)
+    assert result.growth == pytest.approx(0.04)
     assert result.capped is False
     assert result.method == "roe_retention"
     assert result.reason is None
 
 
-def test_growth_is_capped_below_the_wacc():
+def test_growth_is_capped_at_the_ceiling():
     result = compute_growth(
-        GrowthInputs(roe=0.20, retention_ratio=0.50, wacc=0.0765)
+        GrowthInputs(roe=0.20, retention_ratio=0.50, wacc=0.089)
     )
 
     assert result.raw_growth == pytest.approx(0.10)
-    assert result.growth == pytest.approx(0.0765 - 0.015)
+    assert result.growth == pytest.approx(0.05)
+    assert result.capped is True
+    assert "ceiling" in result.reason.lower()
+
+
+def test_growth_is_forced_below_a_low_wacc():
+    result = compute_growth(
+        GrowthInputs(roe=0.20, retention_ratio=0.30, wacc=0.045)
+    )
+
+    assert result.raw_growth == pytest.approx(0.06)
+    assert result.growth == pytest.approx(0.045 - 0.03)
+    assert result.growth < 0.045
     assert result.capped is True
     assert "wacc" in result.reason.lower()
+
+
+def test_growth_keeps_a_minimum_spread_between_the_wacc_and_g():
+    result = compute_growth(
+        GrowthInputs(roe=0.20, retention_ratio=0.50, wacc=0.06)
+    )
+
+    assert result.raw_growth == pytest.approx(0.10)
+    assert result.growth == pytest.approx(0.03)
+    assert result.capped is True
+    assert "between the wacc and g" in result.reason.lower()
 
 
 def test_growth_is_capped_at_the_ceiling_for_buyback_inflated_roe():
@@ -112,7 +135,7 @@ def test_growth_is_capped_at_the_ceiling_for_buyback_inflated_roe():
     )
 
     assert result.raw_growth == pytest.approx(1.275)
-    assert result.growth == pytest.approx(0.10)
+    assert result.growth == pytest.approx(0.05)
     assert result.capped is True
     assert "ceiling" in result.reason.lower()
 

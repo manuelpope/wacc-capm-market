@@ -67,6 +67,10 @@ def compute_wacc(
         )
     if wacc <= 0:
         warnings.append(f"WACC {wacc:.2%} is not positive, the discount rate is unusable")
+    elif wacc < 0.06:
+        warnings.append(
+            f"the WACC is only {wacc:.2%}, the terminal value of a perpetuity is extremely sensitive to it"
+        )
 
     return WaccResult(
         cost_of_equity=cost_of_equity,

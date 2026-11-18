@@ -91,6 +91,7 @@ class ValuationBreakdown(BaseModel):
     enterprise_value: float
     net_debt: float
     equity_value: float
+    terminal_value_share: float = 0.0
     value_per_share: float | None = None
     upside_pct: float | None = None
 

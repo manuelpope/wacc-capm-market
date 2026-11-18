@@ -33,6 +33,7 @@ class ValuationResult:
     pv_terminal: float
     enterprise_value: float
     equity_value: float
+    terminal_value_share: float
     value_per_share: float | None
     upside_pct: float | None
     warnings: tuple[str, ...] = field(default_factory=tuple)
@@ -73,6 +74,13 @@ def compute_valuation(inputs: ValuationInputs) -> ValuationResult:
     else:
         warnings.append("shares outstanding are unavailable, value per share was not computed")
 
+    terminal_value_share = pv_terminal / enterprise_value if enterprise_value else 0.0
+    if terminal_value_share > 0.85:
+        warnings.append(
+            f"the terminal value is {terminal_value_share:.0%} of the enterprise value, "
+            "the result lives almost entirely on the perpetuity assumption"
+        )
+
     if inputs.base_fcf <= 0:
         warnings.append(
             "free cash flow is not positive, the valuation rests on a negative base and is not meaningful"
@@ -93,6 +101,7 @@ def compute_valuation(inputs: ValuationInputs) -> ValuationResult:
         pv_terminal=pv_terminal,
         enterprise_value=enterprise_value,
         equity_value=equity_value,
+        terminal_value_share=terminal_value_share,
         value_per_share=value_per_share,
         upside_pct=upside_pct,
         warnings=tuple(warnings),
