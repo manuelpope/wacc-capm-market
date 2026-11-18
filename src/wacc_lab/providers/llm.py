@@ -45,14 +45,6 @@ class OpenAICompatibleClient:
             raise LLMError("the model returned an empty response")
         return text
 
-    def available(self) -> bool:
-        """Cheap reachability check, used to decide whether to warn."""
-        try:
-            self._post("/models", None)
-            return True
-        except LLMError:
-            return False
-
     # ----------------------------------------------------------------- private
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}

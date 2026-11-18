@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from wacc_lab.api import create_app
 from wacc_lab.db import Store
-from wacc_lab.models import Fundamentals, NewsItem
+from wacc_lab.models import NewsItem
 from wacc_lab.providers.analyst import AnalystExtractor
 from wacc_lab.providers.base import ProviderError
 from wacc_lab.providers.news import YahooNewsProvider
@@ -260,3 +260,24 @@ def test_a_news_failure_does_not_take_the_analysis_down(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["news"] == []
+
+
+def test_a_short_ticker_only_matches_a_standalone_word(monkeypatch):
+    import wacc_lab.providers.news as news_module
+
+    monkeypatch.setattr(
+        news_module.yf,
+        "Ticker",
+        lambda symbol: FakeTicker(
+            [
+                story("The market rallied on rate hopes"),
+                story("T closes the quarter with a profit"),
+            ]
+        ),
+    )
+
+    items = YahooNewsProvider().fetch("T", company_name="AT&T")
+
+    # "The" is not a standalone "T".
+    assert items[0].title.startswith("T closes")
+    assert items[0].relevance == 2

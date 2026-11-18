@@ -127,8 +127,12 @@ def missing_gaps(fundamentals: Fundamentals) -> list[str]:
     gaps: list[str] = []
     for name, bad_sources in GAP_SOURCES.items():
         source = fundamentals.field_sources.get(name, "unavailable")
-        if source in bad_sources:
-            gaps.append(name)
+        if source not in bad_sources:
+            continue
+        if name == "fcf_ttm" and fundamentals.fcf_normalized is not None:
+            # The annual series already gives a base cash flow.
+            continue
+        gaps.append(name)
     return gaps
 
 
@@ -223,6 +227,11 @@ class AnalystExtractor:
                     )
                     continue
                 value = fundamentals.revenue_ttm * value
+                if fundamentals.fcf_normalized is None:
+                    # The annual series is the better base: do not replace it.
+                    updates["fcf_normalized"] = value
+                    updates["fcf_years"] = 1
+                    sources["fcf_normalized"] = "llm"
             updates[name] = value
             sources[name] = "llm"
             note = estimate.notes.get(name)

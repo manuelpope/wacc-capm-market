@@ -57,7 +57,7 @@ quarterly income, balance and cash-flow statements).
 | Capital structure | Total debt vs. market cap | Debt weight = D / (D + E) |
 | ROE | TTM net income ÷ average book equity | Recomputed, never taken from Yahoo (see below) |
 | Retention ratio | 1 − (dividends ÷ net income) | Annual fallback when no quarterly dividend row exists |
-| Free cash flow | TTM `Free Cash Flow` | Falls back to operating cash flow + capex |
+| Free cash flow | Annual `Free Cash Flow` series and TTM | Falls back to operating cash flow + capex |
 
 **ROE is recomputed on purpose.** Yahoo's `returnOnEquity` is inflated for
 companies that buy back stock (Apple reports ~142%). ROE is therefore taken from
@@ -77,7 +77,19 @@ twice:
 Every cap reports why it fired, in the `Growth` card and in the warnings list. A
 manual growth rate skips the ceiling but still obeys the minimum spread.
 
-### 3. The valuation
+### 3. The normalized free cash flow
+
+The base cash flow is the **average of the last three fiscal years**, not the
+last twelve months. The trailing number carries the noise of a single unusual
+quarter (a tax payment, a working capital squeeze, a restructuring), and the
+model then grows that base for five years.
+
+Both figures are shown in the interface, and when they differ by more than 25%
+the tool says so: for Exxon the normalized base is 32% below the trailing
+twelve months, and for Apple it is 16% below, which moves the value per share
+from $179 to $151.
+
+### 4. The valuation
 
 A deliberately simple FCFF-style DCF:
 
@@ -264,9 +276,12 @@ This is the honest list. None of these are hidden behind defaults.
 1. **It is not a full DCF.** One FCF base growing at one rate, discounted at one
    rate. There is no working capital schedule, no capex plan, no debt schedule,
    no three-statement model, and no mid-year convention.
-2. **FCF is not normalized.** It is the latest trailing twelve months. A single
-   unusual quarter (a tax payment, a working capital squeeze, a restructuring)
-   moves the valuation proportionally. There is no 3- or 5-year average.
+2. **The normalization is an average, not an adjustment.** The base is the mean
+   of the last three fiscal years, which smooths the noise but does not correct
+   for a known one-off (a restructuring, a year of heavy capex, a litigation
+   charge). For a growing company the average sits below the latest year, so
+   the model grows from a lower base than the trailing number would give.
+   Three years is a short window for a cyclical business.
 3. **g is an identity, not a forecast.** `ROE × retention` says what growth the
    current returns can fund; it says nothing about what the market expects. It is
    also inflated by buybacks, which is why it usually hits the 5% ceiling.
@@ -348,6 +363,7 @@ src/wacc_lab/
     wacc.py          CAPM, after-tax cost of debt, weights
     growth.py        g = ROE × b, with the ceiling and the minimum-spread rule
     valuation.py     The simple DCF
+    normalization.py The average of the last fiscal years
     sensitivity.py   The WACC x g grid
   providers/
     yahoo.py         Everything that talks to Yahoo Finance

@@ -11,6 +11,7 @@ from .engine.sensitivity import DEFAULT_SPAN, DEFAULT_STEP, compute_sensitivity
 from .engine.valuation import ValuationInputs, compute_valuation
 from .engine.wacc import DEFAULT_EQUITY_RISK_PREMIUM, WaccInputs, compute_wacc
 from .models import (
+    SNAPSHOT_SCHEMA_VERSION,
     AnalysisResult,
     CacheInfo,
     Fundamentals,
@@ -22,7 +23,6 @@ from .models import (
     ValuationBreakdown,
     WaccBreakdown,
 )
-from .models import NewsItem
 from .providers.analyst import AnalystEstimate, AnalystExtractor, missing_gaps
 from .providers.base import FundamentalsProvider, ProviderError
 from .providers.news import NewsProvider
@@ -186,9 +186,13 @@ class AnalysisService:
             fundamentals = self.store.get_snapshot(symbol)
             if fundamentals is None:
                 fundamentals, status = self._fetch(symbol), "computed"
-            elif not fundamentals.field_sources:
-                # A snapshot written before the provenance was tracked cannot be
-                # used: the analyst step would not know what Yahoo really computed.
+            elif (
+                not fundamentals.field_sources
+                or fundamentals.schema_version != SNAPSHOT_SCHEMA_VERSION
+            ):
+                # A snapshot written by an older version cannot be used: it would
+                # be read with missing fields and the analyst step would not know
+                # what Yahoo really computed.
                 fundamentals, status = self._fetch(symbol), "stale"
             else:
                 age = self.store.snapshot_age_hours(symbol)
@@ -328,7 +332,11 @@ class AnalysisService:
             "equity_weight": wacc_result.equity_weight,
             "roe": fundamentals.roe,
             "retention_ratio": fundamentals.retention_ratio,
-            "base_fcf": fundamentals.fcf_ttm,
+            "base_fcf": fundamentals.fcf_normalized
+            if fundamentals.fcf_normalized is not None
+            else fundamentals.fcf_ttm,
+            "fcf_ttm": fundamentals.fcf_ttm,
+            "fcf_years": fundamentals.fcf_years,
             "net_debt": fundamentals.net_debt,
             "shares_outstanding": fundamentals.shares_outstanding,
             "price": fundamentals.price,
@@ -454,11 +462,29 @@ class AnalysisService:
         growth: float,
         warnings: list[str],
     ) -> ValuationBreakdown | None:
-        base_fcf = (
-            overrides.base_fcf
-            if overrides.base_fcf is not None
-            else fundamentals.fcf_ttm
-        )
+        if overrides.base_fcf is not None:
+            base_fcf = overrides.base_fcf
+        elif fundamentals.fcf_normalized is not None:
+            base_fcf = fundamentals.fcf_normalized
+        else:
+            base_fcf = fundamentals.fcf_ttm
+
+        if (
+            overrides.base_fcf is None
+            and fundamentals.fcf_ttm
+            and fundamentals.fcf_normalized
+        ):
+            difference = (
+                fundamentals.fcf_normalized - fundamentals.fcf_ttm
+            ) / abs(fundamentals.fcf_ttm)
+            if abs(difference) > 0.25:
+                direction = "above" if difference > 0 else "below"
+                warnings.append(
+                    f"the normalized free cash flow "
+                    f"({fundamentals.fcf_years} years, {fundamentals.fcf_normalized:,.0f}) is "
+                    f"{abs(difference):.0%} {direction} the trailing twelve months "
+                    f"({fundamentals.fcf_ttm:,.0f}), the valuation uses the normalized one"
+                )
         years = overrides.projection_years or DEFAULT_PROJECTION_YEARS
         if base_fcf is None:
             warnings.append(

@@ -8,7 +8,7 @@ const OVERRIDE_FIELDS = [
   { key: "tax_rate", label: "Tax rate (%)", auto: (a) => a.inputs.tax_rate, percent: true, step: "0.01" },
   { key: "debt_weight", label: "Debt weight (%)", auto: (a) => a.inputs.debt_weight, percent: true, step: "0.01" },
   { key: "growth_rate", label: "Growth g (%)", auto: (a) => a.growth.raw_growth, percent: true, step: "0.01" },
-  { key: "base_fcf", label: "Base free cash flow", auto: (a) => a.inputs.base_fcf, step: "1" },
+  { key: "base_fcf", label: "Base free cash flow (normalized)", auto: (a) => a.inputs.base_fcf, step: "1" },
   { key: "projection_years", label: "Projection horizon (years)", auto: () => 5, step: "1" }
 ];
 
@@ -130,7 +130,9 @@ function renderInputs(analysis) {
       : field.key === "base_fcf"
         ? money(autoValue, currency)
         : autoValue ?? "—";
-    if (sources[field.key] === "llm") {
+    const sourceKeys =
+      field.key === "base_fcf" ? ["fcf_normalized", "fcf_ttm"] : [field.key];
+    if (sourceKeys.some((key) => sources[key] === "llm")) {
       const badge = document.createElement("span");
       badge.className = "badge-llm";
       badge.textContent = "llm";
@@ -236,6 +238,14 @@ function renderSensitivity(grid) {
   const note = document.createElement("span");
   note.textContent = "n/a = the growth rate is not below the WACC";
   legend.appendChild(note);
+
+  for (const warning of grid.warnings || []) {
+    const line = document.createElement("div");
+    line.className = "news-summary";
+    line.style.color = "var(--warn)";
+    line.textContent = warning;
+    legend.appendChild(line);
+  }
 }
 
 async function loadSensitivity(ticker, useLlm) {
@@ -354,6 +364,8 @@ function render(analysis) {
   if (valuation) {
     const currency = analysis.currency;
     setText("val-fcf", money(valuation.base_fcf, currency));
+    setText("val-fcf-years", analysis.inputs.fcf_years ? `${analysis.inputs.fcf_years} years` : "—");
+    setText("val-fcf-ttm", money(analysis.inputs.fcf_ttm, currency));
     setText("val-years", `${valuation.years} years`);
     setText("val-pv-explicit", money(valuation.pv_explicit, currency));
     setText("val-tv", money(valuation.terminal_value, currency));
@@ -377,7 +389,7 @@ function render(analysis) {
       .join("  ·  ");
     setText("val-projection", projection);
   } else {
-    ["val-fcf", "val-years", "val-pv-explicit", "val-tv", "val-pv-tv", "val-ev", "val-tv-share", "val-net-debt", "val-equity", "val-per-share", "val-price", "val-upside", "val-projection"].forEach((id) => setText(id, "—"));
+    ["val-fcf", "val-fcf-years", "val-fcf-ttm", "val-years", "val-pv-explicit", "val-tv", "val-pv-tv", "val-ev", "val-tv-share", "val-net-debt", "val-equity", "val-per-share", "val-price", "val-upside", "val-projection"].forEach((id) => setText(id, "—"));
   }
 
   renderInputs(analysis);
@@ -442,6 +454,7 @@ async function saveOverrides() {
       body: JSON.stringify(payload)
     });
     render(analysis);
+    loadSensitivity(state.ticker, useLlm);
   } catch (err) {
     setStatus(err.message, "error");
   } finally {
@@ -458,6 +471,7 @@ async function resetOverrides() {
       method: "DELETE"
     });
     render(analysis);
+    loadSensitivity(state.ticker, useLlm);
   } catch (err) {
     setStatus(err.message, "error");
   } finally {

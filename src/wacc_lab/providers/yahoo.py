@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import yfinance as yf
 
+from ..engine.normalization import DEFAULT_HORIZON_YEARS, normalized_average
 from ..models import Fundamentals
 from .base import ProviderError, TickerNotFoundError
 
@@ -154,6 +155,7 @@ class YahooProvider:
             q_cashflow = handle.quarterly_cashflow
             a_income = handle.income_stmt
             a_balance = handle.balance_sheet
+            a_cashflow = handle.cashflow
         except Exception as exc:
             raise ProviderError(
                 f"Yahoo Finance statement download failed for {symbol}: {exc}"
@@ -208,6 +210,23 @@ class YahooProvider:
                 fcf_ttm = operating_cf + capex
                 fcf_source = "yahoo_ocf_capex"
 
+        # The annual free cash flow series, oldest first, is what the
+        # normalized base is built from.
+        annual_fcf_row = _row_series(a_cashflow, CASHFLOW_ROWS["free_cash_flow"])
+        annual_series: list[float | None] = []
+        if annual_fcf_row is not None:
+            annual_series = [_to_float(value) for value in annual_fcf_row.iloc[::-1]]
+        fcf_normalized, fcf_years = normalized_average(
+            annual_series, years=DEFAULT_HORIZON_YEARS
+        )
+        if fcf_normalized is None:
+            # No annual series: the trailing twelve months are the base.
+            fcf_normalized = fcf_ttm
+            fcf_years = 1 if fcf_ttm is not None else 0
+            fcf_normalized_source = "yahoo_ttm"
+        else:
+            fcf_normalized_source = "yahoo_annual"
+
         dividends_series = _row_series(q_cashflow, CASHFLOW_ROWS["dividends"])
         dividends_ttm = _recent_sum(dividends_series)
 
@@ -215,7 +234,7 @@ class YahooProvider:
         if rf_warning:
             warnings.append(rf_warning)
 
-        beta, beta_source = self._beta(symbol, info, risk_free_rate)
+        beta, beta_source = self._beta(symbol, info)
         if beta_source == "default":
             warnings.append(
                 "[beta] beta is unavailable for this ticker, 1.0 was used as a neutral assumption"
@@ -233,7 +252,7 @@ class YahooProvider:
         if retention is None:
             # Some companies ( Berkshire Hathaway ) report no quarterly dividend row.
             retention, annual_note, retention_source = self._annual_retention(
-                handle, warnings
+                a_cashflow, a_income, warnings
             )
             if annual_note:
                 warnings.append(annual_note)
@@ -261,6 +280,8 @@ class YahooProvider:
             roe=roe,
             retention_ratio=retention,
             fcf_ttm=fcf_ttm,
+            fcf_normalized=fcf_normalized,
+            fcf_years=fcf_years,
             net_income_ttm=net_income_ttm,
             revenue_ttm=revenue_ttm,
             fetched_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -272,6 +293,7 @@ class YahooProvider:
                 "roe": roe_source,
                 "retention_ratio": retention_source,
                 "fcf_ttm": fcf_source,
+                "fcf_normalized": fcf_normalized_source,
             },
             warnings=warnings,
         )
@@ -306,9 +328,7 @@ class YahooProvider:
         return rate, None
 
     @staticmethod
-    def _beta(
-        symbol: str, info: dict, risk_free_rate: float | None
-    ) -> tuple[float, str]:
+    def _beta(symbol: str, info: dict) -> tuple[float, str]:
         reported = _to_float(info.get("beta"))
         if reported is not None and reported > 0:
             return reported, "yahoo"
@@ -401,7 +421,9 @@ class YahooProvider:
 
     @staticmethod
     def _annual_retention(
-        handle: "yf.Ticker", warnings: list[str]
+        annual_cashflow: pd.DataFrame,
+        annual_income: pd.DataFrame,
+        warnings: list[str],
     ) -> tuple[float | None, str | None, str]:
         """Fallback for tickers without a quarterly dividend row.
 
@@ -409,16 +431,6 @@ class YahooProvider:
         payout ratio stays internally consistent even if the period differs
         from the TTM used elsewhere.
         """
-        try:
-            annual_cashflow = handle.cashflow
-            annual_income = handle.income_stmt
-        except Exception:
-            return (
-                None,
-                "[retention_ratio] dividend data is unavailable, g cannot be derived from the retention ratio",
-                "unavailable",
-            )
-
         dividends = _value(_row_series(annual_cashflow, CASHFLOW_ROWS["dividends"]), 0)
         net_income = _value(_row_series(annual_income, INCOME_ROWS["net_income"]), 0)
         if net_income is None or net_income <= 0:

@@ -11,6 +11,7 @@ debt or retention ratio looks like.
 
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 import yfinance as yf
@@ -19,6 +20,19 @@ from ..models import NewsItem
 from .base import ProviderError
 
 LEGAL_SUFFIXES = ("inc.", "inc", "corp.", "corp", "plc", "ltd.", "ltd", "co.", "co", "s.a.", "sa", "n.v.", "nv", "a.g.", "ag")
+
+
+def _mentions(haystack: str, needle: str) -> bool:
+    """Whether the text mentions the term.
+
+    A short ticker such as "T" or "V" would match almost any text, so it only
+    counts when it appears as a word of its own.
+    """
+    if not needle:
+        return False
+    if len(needle) <= 3:
+        return re.search(rf"\b{re.escape(needle)}\b", haystack) is not None
+    return needle in haystack
 
 
 def _company_keyword(company_name: str | None) -> str:
@@ -118,9 +132,9 @@ class YahooNewsProvider:
         def relevance(item: NewsItem) -> int:
             haystack = f"{item.title} {item.summary or ''}".upper()
             score = 0
-            if symbol.upper() in haystack:
+            if _mentions(haystack, symbol.upper()):
                 score += 2
-            if name and name in haystack:
+            if name and _mentions(haystack, name):
                 score += 1
             return score
 

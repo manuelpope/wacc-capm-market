@@ -35,6 +35,11 @@ S7. "cuando no este disponible calcular los valores por alguna razon , usar un e
     Acceptance: `?use_llm=false` returns the exact Yahoo values; `?use_llm=true` fills only the gaps; a model failure leaves the company untouched.
     Checks: `uv run pytest tests/test_llm.py tests/test_api.py -k analyst`
 
+S10. "arregla el punto de fcf normalizado y luego revisa el codigo para no tener bugs"
+    Scope: The valuation base becomes the average of the last three fiscal years instead of the trailing twelve months, with both figures shown and a warning when they differ by more than 25%. Then a review pass over the whole code base.
+    Acceptance: The base cash flow is the three year average, the trailing figure stays visible, and the review leaves no known defect behind.
+    Checks: `uv run pytest -q`
+
 S9. "dale me parece interesante el siguiente paso"
     Scope: The next step proposed at the end of the previous increment: a WACC x g sensitivity grid, so the interface answers how much of the valuation depends on the two assumptions that carry the most weight, instead of showing a single number.
     Acceptance: The grid is centred on the base case, the base cell matches the valuation shown above it, a cell where g is not below the WACC reports no number, and a cell where the spread is under 3% is flagged as fragile.
@@ -60,6 +65,7 @@ T5 | S6 | inline | done | README.md — run instructions, methodology, "What it 
 T6 | S7 | inline | done | analyst extractor: OpenAI-compatible client, range validation, provenance, toggle
 T7 | S8 | inline | done | news provider + relevance ranking, prompt context, currency formatting, news card
 T8 | S9 | inline | done | sensitivity engine, endpoint, grid card with the colour scale and the fragile marks
+T9 | S10 | inline | done | normalization engine, provider series, valuation base, UI rows, bug review
 
 ## Log
 
@@ -113,3 +119,19 @@ L15 (2026-11-18): The units are now readable: the currency of the ticker is carr
 L16 (2026-11-18): Sensitivity grid. The axes are the base WACC and the base g plus or minus 2 percentage points in steps of 0.5, which is nine by nine cells. Two kinds of cell are not numbers: a cell where g is not below the WACC has no terminal value and reports `n/a`, and a cell where the spread is under 3% is reported but marked as fragile, because the terminal value dominates it. The grid does not apply the growth ceiling of the base case, because exploring assumptions above the ceiling is the point of a grid; it applies only the mathematical rule. For Apple the grid runs from $100.65 to $698.88 around a base case of $179.43, and the two most optimistic corners are exactly the fragile ones, which is the finding the grid exists to deliver.
 
 L17 (2026-11-18): The grid is what makes the earlier corrections legible. The 5% ceiling and the 3% minimum spread are not visible as numbers in the base case, but the grid shows that the whole optimistic corner of the table lives inside the fragile zone, so a bull case built on a narrow spread is arithmetically large and economically weak.
+
+L18 (2026-11-18): Normalized free cash flow. The base is now the average of the last three fiscal years of the `Free Cash Flow` line of the annual statement, instead of the trailing twelve months. Both are kept: the trailing figure stays visible in the interface, and when the two differ by more than 25% the tool says which way and by how much. The effect is not cosmetic: Apple's base drops from $136.06B to $114.54B and the value per share from $179.43 to $151.53, and Exxon's base drops from $42.96B to $29.26B.
+
+L19 (2026-11-18): Review pass. Ten defects found and fixed, each one pinned with a test:
+1. `with sqlite3.connect(...)` does not close the connection, only the transaction: fifteen connections leaked per store call. A session manager now commits and closes.
+2. Importing the module created the database file, because the module level app was built at import time and the store created its schema in the constructor. The schema is now created on the first use.
+3. A snapshot written by an older version was read as if it were current, and the analysis ran with missing fields. Snapshots carry a schema version and the outdated ones are fetched again.
+4. The warning about the normalized cash flow said the opposite of what it meant: it reported the normalized base as "32% above" the trailing figure when it was 32% below.
+5. The analyst could replace a computed normalized cash flow with its own estimate when only the trailing figure was missing. It no longer overwrites a base that Yahoo computed.
+6. A short ticker matched every headline: "T" (AT&T) appeared in every story. Short symbols now have to appear as a word of their own.
+7. The grid hid its own warnings when it had cells, so a company with a negative cash flow showed an empty grid with no explanation.
+8. The health endpoint reported the environment configuration instead of the service that was running.
+9. The inputs table looked for a provenance key that did not exist, so a cash flow estimated by the model never got its LLM badge.
+10. The grid stayed stale after saving or resetting an override, and the provider downloaded the annual cash flow statement twice.
+
+L20 (2026-11-18): The same kind of mistake appeared in the tooling itself twice: two patches did not apply because the anchor text had changed, and both were caught only by running the code afterwards. Every patch in this increment is verified against the real behaviour, not against the diff.

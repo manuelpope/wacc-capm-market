@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+from contextlib import contextmanager
+from typing import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .catalog import list_catalog
-from .models import Fundamentals, Overrides
+from .models import SNAPSHOT_SCHEMA_VERSION, Fundamentals, Overrides
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -70,27 +73,48 @@ class Store:
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.init_schema()
+        self._ready = False
+        self._lock = threading.Lock()
+
+    @contextmanager
+    def _session(self) -> Iterator[sqlite3.Connection]:
+        """A connection that is committed and closed.
+
+        The sqlite3 connection context manager only handles the transaction,
+        it does not close the connection, so it is wrapped here.
+        """
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=15)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        self._ensure_schema(conn)
         return conn
 
-    def init_schema(self) -> None:
-        with self._connect() as conn:
-            conn.executescript(SCHEMA)
-        self.seed_universe()
+    def _ensure_schema(self, conn: sqlite3.Connection) -> None:
+        """Create the schema on the first use, not when the object is built.
 
-    def seed_universe(self) -> None:
-        now = utcnow_iso()
-        rows = [
-            (item.ticker, item.name, item.sector, item.country, now)
-            for item in list_catalog()
-        ]
-        with self._connect() as conn:
+        Importing the application must not create or touch the database file:
+        the module level app object is built at import time.
+        """
+        if self._ready:
+            return
+        with self._lock:
+            if self._ready:
+                return
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            conn.executescript(SCHEMA)
+            now = utcnow_iso()
+            rows = [
+                (item.ticker, item.name, item.sector, item.country, now)
+                for item in list_catalog()
+            ]
             conn.executemany(
                 "INSERT INTO universe (ticker, name, sector, country, added_at) "
                 "VALUES (?, ?, ?, ?, ?) "
@@ -98,10 +122,17 @@ class Store:
                 "sector=excluded.sector, country=excluded.country",
                 rows,
             )
+            conn.commit()
+            self._ready = True
+
+    def init_schema(self) -> None:
+        """Force the schema to exist (used by tooling and tests)."""
+        with self._session() as conn:
+            conn.executescript(SCHEMA)
 
     # ------------------------------------------------------------- snapshots
     def save_snapshot(self, fundamentals: Fundamentals) -> None:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 "INSERT INTO snapshots (ticker, fetched_at, provider, payload) "
                 "VALUES (?, ?, ?, ?) "
@@ -116,16 +147,21 @@ class Store:
             )
 
     def get_snapshot(self, ticker: str) -> Fundamentals | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 "SELECT payload FROM snapshots WHERE ticker = ?", (ticker,)
             ).fetchone()
         if row is None:
             return None
-        return Fundamentals.model_validate_json(row["payload"])
+        payload = json.loads(row["payload"])
+        if payload.get("schema_version") != SNAPSHOT_SCHEMA_VERSION:
+            # A snapshot written by an older version is not readable: it would
+            # be missing fields the analysis needs. The caller refetches it.
+            return None
+        return Fundamentals.model_validate(payload)
 
     def snapshot_age_hours(self, ticker: str) -> float | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 "SELECT fetched_at FROM snapshots WHERE ticker = ?", (ticker,)
             ).fetchone()
@@ -137,7 +173,7 @@ class Store:
     # -------------------------------------------------------------- analyses
     def save_analysis(self, ticker: str, payload: dict[str, Any]) -> str:
         computed_at = utcnow_iso()
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 "INSERT INTO analyses (ticker, computed_at, payload) VALUES (?, ?, ?) "
                 "ON CONFLICT(ticker) DO UPDATE SET computed_at=excluded.computed_at, "
@@ -147,7 +183,7 @@ class Store:
         return computed_at
 
     def get_analysis(self, ticker: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 "SELECT payload FROM analyses WHERE ticker = ?", (ticker,)
             ).fetchone()
@@ -156,7 +192,7 @@ class Store:
     # ------------------------------------------------------------- overrides
     def save_overrides(self, ticker: str, overrides: Overrides) -> str:
         updated_at = utcnow_iso()
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 "INSERT INTO overrides (ticker, updated_at, payload) VALUES (?, ?, ?) "
                 "ON CONFLICT(ticker) DO UPDATE SET updated_at=excluded.updated_at, "
@@ -166,7 +202,7 @@ class Store:
         return updated_at
 
     def get_overrides(self, ticker: str) -> Overrides | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 "SELECT payload FROM overrides WHERE ticker = ?", (ticker,)
             ).fetchone()
@@ -175,7 +211,7 @@ class Store:
         return Overrides.model_validate_json(row["payload"])
 
     def delete_overrides(self, ticker: str) -> bool:
-        with self._connect() as conn:
+        with self._session() as conn:
             cursor = conn.execute("DELETE FROM overrides WHERE ticker = ?", (ticker,))
             return cursor.rowcount > 0
 
@@ -196,7 +232,7 @@ class Store:
             for item in items
             if item.get("title")
         ]
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.executemany(
                 "INSERT INTO news (ticker, title, publisher, published_at, link, summary, "
                 "relevance, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
@@ -209,7 +245,7 @@ class Store:
         return fetched_at
 
     def get_news(self, ticker: str, limit: int = 8) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 "SELECT title, publisher, published_at, link, summary, relevance FROM news "
                 "WHERE ticker = ? ORDER BY relevance DESC, published_at DESC LIMIT ?",
@@ -218,7 +254,7 @@ class Store:
         return [dict(row) for row in rows]
 
     def news_age_hours(self, ticker: str) -> float | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 "SELECT MAX(fetched_at) AS latest FROM news WHERE ticker = ?", (ticker,)
             ).fetchone()
@@ -238,7 +274,7 @@ class Store:
     ) -> str:
         updated_at = utcnow_iso()
         payload = {"values": values, "notes": notes or {}}
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute(
                 "INSERT INTO llm_estimates (ticker, updated_at, snapshot_at, model, payload) "
                 "VALUES (?, ?, ?, ?, ?) "
@@ -250,7 +286,7 @@ class Store:
         return updated_at
 
     def get_llm_estimates(self, ticker: str) -> dict[str, Any] | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 "SELECT snapshot_at, model, payload FROM llm_estimates WHERE ticker = ?",
                 (ticker,),
@@ -264,7 +300,7 @@ class Store:
 
     # -------------------------------------------------------------- universe
     def list_universe(self) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 "SELECT ticker, name, sector, country FROM universe ORDER BY ticker"
             ).fetchall()

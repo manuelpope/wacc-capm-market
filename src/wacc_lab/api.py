@@ -65,14 +65,20 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict[str, object]:
+        analyst = active_service.analyst
         return {
             "status": "ok",
-            "database": str(settings.db_path),
-            "ttl_hours": settings.ttl_hours,
+            "database": str(active_service.store.path),
+            "ttl_hours": active_service.ttl_hours,
+            "news": {
+                "enabled": active_service.news_provider is not None,
+                "ttl_hours": active_service.news_ttl_hours,
+                "limit": active_service.news_limit,
+            },
             "analyst": {
-                "enabled": settings.llm.enabled,
+                "enabled": analyst is not None,
+                "model": analyst.model_label if analyst else None,
                 "base_url": settings.llm.base_url,
-                "model": settings.llm.model,
                 "mode": settings.llm.mode,
             },
         }

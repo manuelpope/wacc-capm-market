@@ -9,12 +9,10 @@ import pytest
 from wacc_lab.models import Fundamentals
 from wacc_lab.providers.analyst import (
     ESTIMABLE_FIELDS,
-    AnalystEstimate,
     AnalystExtractor,
     extract_json_object,
     missing_gaps,
 )
-from wacc_lab.providers.base import TickerNotFoundError
 
 
 class FakeLLM:
@@ -318,3 +316,44 @@ def test_the_provider_fallback_warning_is_dropped_when_the_model_answers():
     )
     # A warning about a field the model did not answer stays.
     assert any(warning.startswith("[retention_ratio]") for warning in result.warnings)
+
+
+def test_the_analyst_does_not_replace_a_computed_normalized_cash_flow():
+    llm = FakeLLM(json.dumps({"fcf_margin": 0.2}))
+    fund = fundamentals(
+        fcf_ttm=None,
+        fcf_normalized=100.0,
+        fcf_years=3,
+        revenue_ttm=500_000_000_000.0,
+        field_sources={
+            "pretax_cost_of_debt": "yahoo",
+            "tax_rate": "yahoo",
+            "roe": "yahoo",
+            "retention_ratio": "yahoo",
+            "fcf_ttm": "unavailable",
+        },
+    )
+    extractor = AnalystExtractor(llm)
+
+    result = extractor.apply(fund, extractor.estimate("AAPL", fund, ["fcf_ttm"]))
+
+    # The annual series is the better base, it stays.
+    assert result.fcf_normalized == pytest.approx(100.0)
+    assert result.fcf_years == 3
+
+
+def test_the_cash_flow_is_not_a_gap_when_the_annual_series_exists():
+    fund = fundamentals(
+        fcf_ttm=None,
+        fcf_normalized=100.0,
+        fcf_years=3,
+        field_sources={
+            "pretax_cost_of_debt": "yahoo",
+            "tax_rate": "yahoo",
+            "roe": "yahoo",
+            "retention_ratio": "yahoo",
+            "fcf_ttm": "unavailable",
+        },
+    )
+
+    assert "fcf_ttm" not in missing_gaps(fund)

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+# Bumped whenever the shape of a snapshot changes, so a snapshot written by
+# an older version is refreshed instead of being read with missing fields.
+SNAPSHOT_SCHEMA_VERSION = 2
+
 
 class Fundamentals(BaseModel):
     """Raw market and financial facts for one ticker, as seen by the provider."""
@@ -33,10 +37,13 @@ class Fundamentals(BaseModel):
     retention_ratio: float | None = None
 
     fcf_ttm: float | None = None
+    fcf_normalized: float | None = None
+    fcf_years: int = 0
     net_income_ttm: float | None = None
     revenue_ttm: float | None = None
 
     fetched_at: str
+    schema_version: int = SNAPSHOT_SCHEMA_VERSION
     field_sources: dict[str, str] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
 
