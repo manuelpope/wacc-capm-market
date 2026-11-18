@@ -14,12 +14,15 @@ from .models import (
     CacheInfo,
     Fundamentals,
     GrowthBreakdown,
+    NewsItem,
     Overrides,
     ValuationBreakdown,
     WaccBreakdown,
 )
+from .models import NewsItem
 from .providers.analyst import AnalystEstimate, AnalystExtractor, missing_gaps
-from .providers.base import FundamentalsProvider
+from .providers.base import FundamentalsProvider, ProviderError
+from .providers.news import NewsProvider
 
 DEFAULT_TAX_RATE = 0.21
 DEFAULT_RISK_FREE_RATE = 0.04
@@ -34,20 +37,29 @@ class AnalysisService:
         provider: FundamentalsProvider,
         ttl_hours: float = 24.0,
         analyst: AnalystExtractor | None = None,
+        news_provider: NewsProvider | None = None,
+        news_ttl_hours: float = 6.0,
+        news_limit: int = 8,
     ) -> None:
         self.store = store
         self.provider = provider
         self.ttl_hours = ttl_hours
         self.analyst = analyst
+        self.news_provider = news_provider
+        self.news_ttl_hours = news_ttl_hours
+        self.news_limit = news_limit
 
     # ------------------------------------------------------------- public API
     def analyze(
         self, ticker: str, refresh: bool = False, use_llm: bool = True
     ) -> AnalysisResult:
         symbol = ticker.strip().upper()
-        fundamentals, status = self._snapshot(symbol, refresh, use_llm)
+        fundamentals, status = self._snapshot(symbol, refresh)
+        news = self._news_step(symbol, refresh, use_llm, fundamentals.name)
+        if use_llm and self.analyst is not None:
+            fundamentals = self._analyst_step(symbol, fundamentals, news)
         overrides = self.store.get_overrides(symbol)
-        result = self._build(symbol, fundamentals, overrides, status)
+        result = self._build(symbol, fundamentals, overrides, status, news)
         computed_at = self.store.save_analysis(symbol, result.model_dump(mode="json"))
         result.cache.computed_at = computed_at
         return result
@@ -65,9 +77,33 @@ class AnalysisService:
         return self.analyze(symbol, use_llm=use_llm)
 
     # -------------------------------------------------------------- internals
-    def _snapshot(
-        self, symbol: str, refresh: bool, use_llm: bool
-    ) -> tuple[Fundamentals, str]:
+    def _news_step(
+        self,
+        symbol: str,
+        refresh: bool,
+        use_llm: bool,
+        company_name: str | None = None,
+    ) -> list[NewsItem]:
+        """Load the stories that feed the analyst, with a cache of their own."""
+        if not use_llm or self.news_provider is None:
+            return []
+        age = self.store.news_age_hours(symbol)
+        if refresh or age is None or age > self.news_ttl_hours:
+            try:
+                items = self.news_provider.fetch(
+                    symbol, limit=self.news_limit, company_name=company_name
+                )
+            except ProviderError:
+                # The news are context, not the analysis: a failure here must not
+                # take the whole valuation down.
+                items = []
+            if items:
+                self.store.save_news(symbol, [item.model_dump() for item in items])
+        return [
+            NewsItem(**row) for row in self.store.get_news(symbol, self.news_limit)
+        ]
+
+    def _snapshot(self, symbol: str, refresh: bool) -> tuple[Fundamentals, str]:
         if refresh:
             fundamentals, status = self._fetch(symbol), "refreshed"
         else:
@@ -85,11 +121,14 @@ class AnalysisService:
                 else:
                     status = "fresh"
 
-        if use_llm and self.analyst is not None:
-            fundamentals = self._analyst_step(symbol, fundamentals)
         return fundamentals, status
 
-    def _analyst_step(self, symbol: str, fundamentals: Fundamentals) -> Fundamentals:
+    def _analyst_step(
+        self,
+        symbol: str,
+        fundamentals: Fundamentals,
+        news: list[NewsItem] | None = None,
+    ) -> Fundamentals:
         """Fill the gaps the provider left with the analyst model.
 
         The estimates are stored next to the snapshot, so a second request
@@ -110,7 +149,7 @@ class AnalysisService:
                 values=stored.get("values", {}), notes=stored.get("notes", {})
             )
         else:
-            estimate = self.analyst.estimate(symbol, fundamentals, gaps)
+            estimate = self.analyst.estimate(symbol, fundamentals, gaps, news=news)
             if estimate.values:
                 self.store.save_llm_estimates(
                     ticker=symbol,
@@ -132,6 +171,7 @@ class AnalysisService:
         fundamentals: Fundamentals,
         overrides: Overrides | None,
         status: str,
+        news: list[NewsItem] | None = None,
     ) -> AnalysisResult:
         active = overrides or Overrides()
         warnings: list[str] = [
@@ -245,6 +285,7 @@ class AnalysisService:
             ),
             growth=growth,
             valuation=valuation,
+            news=news or [],
             warnings=warnings,
         )
 

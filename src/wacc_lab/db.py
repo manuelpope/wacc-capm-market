@@ -31,6 +31,18 @@ CREATE TABLE IF NOT EXISTS overrides (
     payload     TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS news (
+    ticker        TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    publisher     TEXT,
+    published_at  TEXT,
+    link          TEXT,
+    summary       TEXT,
+    relevance     INTEGER NOT NULL DEFAULT 0,
+    fetched_at    TEXT NOT NULL,
+    PRIMARY KEY (ticker, title)
+);
+
 CREATE TABLE IF NOT EXISTS llm_estimates (
     ticker       TEXT PRIMARY KEY,
     updated_at   TEXT NOT NULL,
@@ -166,6 +178,54 @@ class Store:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM overrides WHERE ticker = ?", (ticker,))
             return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------ news
+    def save_news(self, ticker: str, items: list[dict[str, Any]]) -> str:
+        fetched_at = utcnow_iso()
+        rows = [
+            (
+                ticker,
+                item.get("title", ""),
+                item.get("publisher"),
+                item.get("published_at"),
+                item.get("link"),
+                item.get("summary"),
+                int(item.get("relevance", 0)),
+                fetched_at,
+            )
+            for item in items
+            if item.get("title")
+        ]
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO news (ticker, title, publisher, published_at, link, summary, "
+                "relevance, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(ticker, title) DO UPDATE SET publisher=excluded.publisher, "
+                "published_at=excluded.published_at, link=excluded.link, "
+                "summary=excluded.summary, relevance=excluded.relevance, "
+                "fetched_at=excluded.fetched_at",
+                rows,
+            )
+        return fetched_at
+
+    def get_news(self, ticker: str, limit: int = 8) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT title, publisher, published_at, link, summary, relevance FROM news "
+                "WHERE ticker = ? ORDER BY relevance DESC, published_at DESC LIMIT ?",
+                (ticker, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def news_age_hours(self, ticker: str) -> float | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(fetched_at) AS latest FROM news WHERE ticker = ?", (ticker,)
+            ).fetchone()
+        if row is None or not row["latest"]:
+            return None
+        fetched = datetime.fromisoformat(row["latest"])
+        return (datetime.now(timezone.utc) - fetched).total_seconds() / 3600.0
 
     # -------------------------------------------------------- llm estimates
     def save_llm_estimates(

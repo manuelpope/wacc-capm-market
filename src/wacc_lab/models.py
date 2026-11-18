@@ -110,7 +110,17 @@ class AnalysisResult(BaseModel):
     wacc: WaccBreakdown
     growth: GrowthBreakdown
     valuation: ValuationBreakdown | None = None
+    news: list[NewsItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class NewsItem(BaseModel):
+    title: str
+    publisher: str | None = None
+    published_at: str | None = None
+    link: str | None = None
+    summary: str | None = None
+    relevance: int = 0
 
 
 class TickerInfo(BaseModel):

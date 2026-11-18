@@ -19,13 +19,33 @@ function pct(value, digits = 2) {
   return `${(value * 100).toFixed(digits)}%`;
 }
 
-function money(value) {
+const CURRENCY_SYMBOLS = {
+  USD: "$", EUR: "€", GBP: "£", JPY: "¥", CNY: "¥", CHF: "CHF ", CAD: "CA$",
+  AUD: "A$", BRL: "R$", ARS: "AR$", MXN: "MX$", INR: "₹", KRW: "₩", SEK: "SEK ",
+  NOK: "NOK ", DKK: "DKK ", HKD: "HK$", TWD: "NT$"
+};
+
+function currencyPrefix(currency) {
+  if (!currency) return "";
+  return CURRENCY_SYMBOLS[currency] || `${currency} `;
+}
+
+function money(value, currency) {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  const prefix = currencyPrefix(currency);
   const abs = Math.abs(value);
-  if (abs >= 1e12) return `${(value / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
-  return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (abs >= 1e12) return `${prefix}${(value / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${prefix}${(value / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${prefix}${(value / 1e6).toFixed(2)}M`;
+  return `${prefix}${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function price(value, currency) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  return `${currencyPrefix(currency)}${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
 }
 
 function number(value, digits = 2) {
@@ -92,6 +112,7 @@ async function loadCatalog() {
 }
 
 function renderInputs(analysis) {
+  const currency = analysis.currency;
   const body = $("inputs-body");
   body.innerHTML = "";
   const overrides = analysis.overrides || {};
@@ -104,7 +125,11 @@ function renderInputs(analysis) {
 
     const automatic = document.createElement("td");
     const autoValue = field.auto(analysis);
-    automatic.textContent = field.percent ? pct(autoValue) : autoValue ?? "—";
+    automatic.textContent = field.percent
+      ? pct(autoValue)
+      : field.key === "base_fcf"
+        ? money(autoValue, currency)
+        : autoValue ?? "—";
     if (sources[field.key] === "llm") {
       const badge = document.createElement("span");
       badge.className = "badge-llm";
@@ -127,6 +152,46 @@ function renderInputs(analysis) {
 
     row.append(label, automatic, overrideCell);
     body.appendChild(row);
+  }
+}
+
+function renderNews(analysis) {
+  const list = $("news");
+  list.innerHTML = "";
+  const items = analysis.news || [];
+  if (!items.length) {
+    const empty = document.createElement("li");
+    empty.className = "news-empty";
+    empty.textContent =
+      "No news loaded. The headlines are read when the analyst model is enabled.";
+    list.appendChild(empty);
+    return;
+  }
+  for (const item of items) {
+    const entry = document.createElement("li");
+    const title = document.createElement("div");
+    if (item.link) {
+      const link = document.createElement("a");
+      link.href = item.link;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = item.title;
+      title.appendChild(link);
+    } else {
+      title.textContent = item.title;
+    }
+    const meta = document.createElement("div");
+    meta.className = "news-meta";
+    const date = (item.published_at || "").slice(0, 10);
+    meta.textContent = [item.publisher, date].filter(Boolean).join(" · ");
+    entry.append(title, meta);
+    if (item.summary) {
+      const summary = document.createElement("div");
+      summary.className = "news-summary";
+      summary.textContent = item.summary;
+      entry.appendChild(summary);
+    }
+    list.appendChild(entry);
   }
 }
 
@@ -160,10 +225,15 @@ function render(analysis) {
     "headline-growth-meta",
     growth.manual ? "manual override" : `ROE × retention (raw ${pct(growth.raw_growth)})`
   );
-  setText("headline-value", valuation && valuation.value_per_share ? valuation.value_per_share.toFixed(2) : "—");
+  setText(
+    "headline-value",
+    valuation && valuation.value_per_share
+      ? price(valuation.value_per_share, analysis.currency)
+      : "—"
+  );
   setText(
     "headline-value-meta",
-    analysis.price ? `current price ${analysis.price.toFixed(2)}` : "DCF estimate"
+    analysis.price ? `current price ${price(analysis.price, analysis.currency)}` : "DCF estimate"
   );
 
   setText("wacc-rf", pct(inputs.risk_free_rate));
@@ -186,17 +256,18 @@ function render(analysis) {
   setText("growth-final", pct(growth.growth));
 
   if (valuation) {
-    setText("val-fcf", money(valuation.base_fcf));
+    const currency = analysis.currency;
+    setText("val-fcf", money(valuation.base_fcf, currency));
     setText("val-years", `${valuation.years} years`);
-    setText("val-pv-explicit", money(valuation.pv_explicit));
-    setText("val-tv", money(valuation.terminal_value));
-    setText("val-pv-tv", money(valuation.pv_terminal));
-    setText("val-ev", money(valuation.enterprise_value));
+    setText("val-pv-explicit", money(valuation.pv_explicit, currency));
+    setText("val-tv", money(valuation.terminal_value, currency));
+    setText("val-pv-tv", money(valuation.pv_terminal, currency));
+    setText("val-ev", money(valuation.enterprise_value, currency));
     setText("val-tv-share", pct(valuation.terminal_value_share, 1));
-    setText("val-net-debt", money(valuation.net_debt));
-    setText("val-equity", money(valuation.equity_value));
-    setText("val-per-share", valuation.value_per_share ? valuation.value_per_share.toFixed(2) : "—");
-    setText("val-price", analysis.price ? analysis.price.toFixed(2) : "—");
+    setText("val-net-debt", money(valuation.net_debt, currency));
+    setText("val-equity", money(valuation.equity_value, currency));
+    setText("val-per-share", valuation.value_per_share ? price(valuation.value_per_share, currency) : "—");
+    setText("val-price", analysis.price ? price(analysis.price, currency) : "—");
     const upside = $("val-upside");
     if (valuation.upside_pct === null || valuation.upside_pct === undefined) {
       upside.textContent = "—";
@@ -206,7 +277,7 @@ function render(analysis) {
       upside.className = valuation.upside_pct >= 0 ? "up" : "down";
     }
     const projection = valuation.projected_fcf
-      .map((fcf, index) => `Y${index + 1}: ${money(fcf)}`)
+      .map((fcf, index) => `Y${index + 1}: ${money(fcf, analysis.currency)}`)
       .join("  ·  ");
     setText("val-projection", projection);
   } else {
@@ -214,6 +285,7 @@ function render(analysis) {
   }
 
   renderInputs(analysis);
+  renderNews(analysis);
   renderWarnings(analysis);
 
   const statusLabels = {

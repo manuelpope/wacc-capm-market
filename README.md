@@ -139,12 +139,48 @@ fallback, and `WACC_LAB_LLM_MODE=completions` switches to the plain
 
 ---
 
+## Recent news
+
+The interface has a **Recent news** section, and those headlines are also the
+context the analyst model reads before it estimates anything.
+
+- **Source**: the Yahoo Finance news feed of the ticker, cached in SQLite with
+  its own TTL (6 hours by default) so a second request does not re-fetch it.
+- **Relevance**: Yahoo mixes market-wide stories into a ticker feed. The items
+  that name the ticker or the company are ranked first, and the ones that say
+  nothing about the company are dropped when enough relevant ones are left.
+- **Context for the model**: each headline, its publisher, its date and a
+  truncated summary go into the prompt, and the model is asked to take them
+  into account (a debt issue, a dividend decision, an acquisition, an outage)
+  and to say in the note when a headline drove the estimate.
+- **It is context, not the analysis**: a news failure never takes the
+  valuation down, it only means the model estimates without the headlines.
+
+```bash
+export WACC_LAB_NEWS_TTL_HOURS=6
+export WACC_LAB_NEWS_LIMIT=8
+```
+
+---
+
+## The interface
+
+Single page, no build step: a ticker picker (curated catalog plus any Yahoo
+ticker), the analysis cards (WACC, growth, valuation, inputs, news, warnings)
+and an inputs table where every automatic value can be overridden by hand.
+
+Monetary values are shown with the currency of the ticker — `$136.06B`,
+`$3.36T`, `$179.43` — never as a raw number, and the values the analyst model
+wrote carry an `LLM` badge.
+
+---
+
 ## API
 
 | Method | Route | What it does |
 |---|---|---|
 | `GET` | `/api/tickers` | The curated universe (69 tickers, grouped by sector) |
-| `GET` | `/api/analysis/{ticker}` | The full analysis; `?refresh=true` forces a recompute, `?use_llm=false` skips the analyst |
+| `GET` | `/api/analysis/{ticker}` | The full analysis; `?refresh=true` forces a recompute, `?use_llm=false` skips the analyst and the news |
 | `POST` | `/api/analysis/{ticker}/overrides` | Saves manual inputs and recomputes |
 | `DELETE` | `/api/analysis/{ticker}/overrides` | Drops the overrides and goes back to automatic |
 | `GET` | `/api/health` | Database path and cache TTL |
@@ -255,6 +291,12 @@ This is the honest list. None of these are hidden behind defaults.
     invented company. The fallback fills gaps, it does not replace the source.
 19. **The analyst is slow.** A first call pays the model load plus the
     inference (tens of seconds); the estimate is then cached with the snapshot.
+20. **The news are headlines, not articles.** The model reads the title, the
+    publisher, the date and a truncated summary. It does not read the full
+    story, and Yahoo's own relevance ranking decides what reaches the feed.
+21. **The news filter is textual.** A story that mentions the company in one
+    sentence is kept, and a story about the company that never says its name
+    is dropped. The order of the headlines is a heuristic, not a judgement.
 
 ---
 
@@ -275,6 +317,7 @@ src/wacc_lab/
     yahoo.py         Everything that talks to Yahoo Finance
     analyst.py       The gap detector, the prompt and the range validation
     llm.py           The OpenAI-compatible client
+    news.py          The news feed and its relevance ranking
   static/            index.html, app.js, styles.css (no build step)
 tests/               Engine, analyst and API tests, all offline
 odd/tasks/           The feature document used while building this

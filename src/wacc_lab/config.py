@@ -47,6 +47,8 @@ class LLMSettings:
 class Settings:
     db_path: Path = DEFAULT_DB_PATH
     ttl_hours: float = DEFAULT_TTL_HOURS
+    news_ttl_hours: float = 6.0
+    news_limit: int = 8
     llm: LLMSettings = LLMSettings()
 
     @classmethod
@@ -57,4 +59,20 @@ class Settings:
             ttl_hours = float(ttl_raw) if ttl_raw else DEFAULT_TTL_HOURS
         except ValueError:
             ttl_hours = DEFAULT_TTL_HOURS
-        return cls(db_path=db_path, ttl_hours=ttl_hours, llm=LLMSettings.from_env())
+        news_ttl_raw = os.environ.get("WACC_LAB_NEWS_TTL_HOURS")
+        try:
+            news_ttl_hours = float(news_ttl_raw) if news_ttl_raw else 6.0
+        except ValueError:
+            news_ttl_hours = 6.0
+        limit_raw = os.environ.get("WACC_LAB_NEWS_LIMIT")
+        try:
+            news_limit = int(limit_raw) if limit_raw else 8
+        except ValueError:
+            news_limit = 8
+        return cls(
+            db_path=db_path,
+            ttl_hours=ttl_hours,
+            news_ttl_hours=news_ttl_hours,
+            news_limit=news_limit,
+            llm=LLMSettings.from_env(),
+        )

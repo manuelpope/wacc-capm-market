@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from ..models import Fundamentals
+from ..models import Fundamentals, NewsItem
 
 SYSTEM_PROMPT = (
     "You are a careful equity analyst. You answer with JSON only, no prose. "
@@ -142,12 +142,13 @@ class AnalystExtractor:
         ticker: str,
         fundamentals: Fundamentals | None,
         gaps: list[str],
+        news: list[NewsItem] | None = None,
     ) -> AnalystEstimate:
         wanted = [name for name in gaps if name in ESTIMABLE_FIELDS]
         if not wanted:
             return AnalystEstimate()
 
-        prompt = self._build_prompt(ticker, fundamentals, wanted)
+        prompt = self._build_prompt(ticker, fundamentals, wanted, news or [])
         try:
             raw = self.client.complete(prompt, system=SYSTEM_PROMPT)
         except Exception as exc:  # the model is a best effort, never a hard dependency
@@ -247,6 +248,7 @@ class AnalystExtractor:
         ticker: str,
         fundamentals: Fundamentals | None,
         wanted: list[str],
+        news: list[NewsItem] | None = None,
     ) -> str:
         facts = self._known_facts(fundamentals)
         lines = [
@@ -261,6 +263,17 @@ class AnalystExtractor:
             if fundamentals.currency:
                 lines.append(f"Currency: {fundamentals.currency}")
         lines.extend(["", "Known facts:", *facts] if facts else ["", "No facts are available."])
+        headlines = self._news_lines(news or [])
+        if headlines:
+            lines.extend(["", "Recent news about this company:", *headlines])
+            lines.extend(
+                [
+                    "- Take the news into account when it changes the estimate "
+                    "(a debt issue, a dividend decision, an acquisition, an outage, "
+                    "a leadership change).",
+                    "- Say in the note when a headline drove the estimate.",
+                ]
+            )
         lines.extend(["", "Estimate ONLY these fields:"])
         for name in wanted:
             spec = ESTIMABLE_FIELDS[name]
@@ -285,6 +298,20 @@ class AnalystExtractor:
             ]
         )
         return "\n".join(lines)
+
+    @staticmethod
+    def _news_lines(news: list[NewsItem]) -> list[str]:
+        lines: list[str] = []
+        for item in news[:8]:
+            date = (item.published_at or "")[:10]
+            publisher = item.publisher or ""
+            head = f"- [{date}] {item.title}"
+            if publisher:
+                head = f"- [{date}] {publisher}: {item.title}"
+            lines.append(head)
+            if item.summary:
+                lines.append(f"  {item.summary[:220]}")
+        return lines
 
     @staticmethod
     def _known_facts(fundamentals: Fundamentals | None) -> list[str]:

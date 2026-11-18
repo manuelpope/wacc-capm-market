@@ -12,6 +12,7 @@ from .models import AnalysisResult, Overrides
 from .providers.analyst import AnalystExtractor
 from .providers.base import ProviderError, TickerNotFoundError
 from .providers.llm import LLMConfig, OpenAICompatibleClient
+from .providers.news import YahooNewsProvider
 from .providers.yahoo import YahooProvider
 from .service import AnalysisService
 
@@ -41,6 +42,9 @@ def build_service(settings: Settings | None = None) -> AnalysisService:
         provider=provider,
         ttl_hours=settings.ttl_hours,
         analyst=analyst,
+        news_provider=YahooNewsProvider(),
+        news_ttl_hours=settings.news_ttl_hours,
+        news_limit=settings.news_limit,
     )
 
 
