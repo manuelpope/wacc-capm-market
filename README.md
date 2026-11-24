@@ -1,7 +1,8 @@
 # WACC Lab
 
-FastAPI + HTML tool to compute **WACC**, **g** and a simple DCF for Yahoo Finance
-tickers. Results are stored in SQLite and recomputed when they are missing or stale.
+Version 1.0.0 — FastAPI + HTML tool to compute **WACC**, **g** and a simple DCF for
+Yahoo Finance tickers. Results are stored in SQLite and recomputed when they are
+missing or stale.
 
 The flow is deliberately small: pick a ticker, get the numbers, override whatever
 you disagree with, and read the valuation.
@@ -15,10 +16,13 @@ you disagree with, and read the valuation.
 ```bash
 cd projects/wacc-lab
 uv venv --python 3.13
-uv pip install -e ".[dev]"
+uv sync --extra dev            # or: uv pip install -e ".[dev]"
 
-PYTHONPATH=src .venv/bin/python -m uvicorn wacc_lab.api:app --reload
+.venv/bin/python -m uvicorn wacc_lab.api:app --reload
 ```
+
+`uv.lock` is committed, so `uv sync` installs the exact set of versions this
+release was verified against.
 
 Open <http://127.0.0.1:8000>.
 
@@ -159,7 +163,10 @@ answers it by recomputing the valuation for combinations of WACC and g around
 the base case.
 
 - **Axes**: the WACC and the g of the base case, plus or minus 2 percentage
-  points in steps of 0.5 (`?span=0.02&step=0.005`).
+  points in steps of 0.5 (`?span=0.02&step=0.005`). The size of the grid is
+  bounded: `span` has to be between 0.001 and 0.25 and `step` between 0.0005
+  and 0.05, and anything outside that is refused with a 422 instead of being
+  allowed to build a grid of millions of cells.
 - **Cells**: the value per share, shaded green when it is above the current
   price and red when it is below, with the intensity following the distance.
 - **The outlined cell is the base case**, and it always matches the valuation
@@ -220,7 +227,7 @@ wrote carry an `LLM` badge.
 | `GET` | `/api/analysis/{ticker}` | The full analysis; `?refresh=true` forces a recompute, `?use_llm=false` skips the analyst and the news |
 | `POST` | `/api/analysis/{ticker}/overrides` | Saves manual inputs and recomputes |
 | `DELETE` | `/api/analysis/{ticker}/overrides` | Drops the overrides and goes back to automatic |
-| `GET` | `/api/analysis/{ticker}/sensitivity` | The WACC x g grid; `?span=` and `?step=` size it |
+| `GET` | `/api/analysis/{ticker}/sensitivity` | The WACC x g grid; `?span=` and `?step=` size it (bounded, see above) |
 | `GET` | `/api/health` | Database path, cache TTL and the analyst configuration |
 | `GET` | `/` | The web interface |
 
@@ -239,6 +246,11 @@ wrote carry an `LLM` badge.
   "projection_years": 5
 }
 ```
+
+Every one of them has to be a finite number. Python's JSON parser accepts
+`NaN` and `Infinity` as literals, so a request can carry them; they are
+refused with a 422, because a single one of them would turn every number of
+the answer into a NaN while the response still said 200.
 
 ---
 
@@ -304,9 +316,10 @@ This is the honest list. None of these are hidden behind defaults.
    ignored.
 9. **No currency conversion.** Every figure stays in the reporting currency of the
    ticker. Comparing a US dollar DCF with a euro or yen one is not meaningful.
-10. **No consensus estimates, no scenarios, no sensitivity tables.** There is no
-    analyst forecast, no bull/base/bear case, no WACC × g grid and no Monte Carlo.
-    The model gives one number plus its warnings.
+10. **No consensus estimates and no scenarios.** There is no analyst forecast and
+    no bull/base/bear case. There *is* a WACC × g grid, which is a sensitivity
+    table and not a forecast: it moves the two inputs of the model and says
+    nothing about what the business will do.
 11. **Yahoo Finance data is scraped, not contracted.** `yfinance` reads
     non-public endpoints. Row names change, fields go missing, and rate limiting
     happens. A missing field silently becomes a fallback with a warning, never a

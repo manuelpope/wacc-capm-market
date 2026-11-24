@@ -86,7 +86,10 @@ def apply_growth_caps(
 
     if growth < 0:
         growth = 0.0
-        reasons.append("the WACC is below the minimum spread, g was set to 0")
+        if raw_growth < 0:
+            reasons.append("the growth rate is negative, g was set to 0")
+        else:
+            reasons.append("the WACC is below the minimum spread, g was set to 0")
 
     return growth, reasons, warnings
 

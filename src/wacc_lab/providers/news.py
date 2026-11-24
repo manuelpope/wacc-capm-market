@@ -15,6 +15,7 @@ import re
 from typing import Protocol
 
 import yfinance as yf
+from pydantic import ValidationError
 
 from ..models import NewsItem
 from .base import ProviderError
@@ -47,6 +48,24 @@ def _company_keyword(company_name: str | None) -> str:
     return name.strip(" ,.")
 
 
+def _as_text(value: object) -> str | None:
+    """A field of the payload as text, or nothing when it is not one.
+
+    Yahoo is not consistent about the types it returns: a publication date
+    can be an ISO string in one build and an epoch in another. A field that
+    cannot be read is dropped instead of breaking the whole analysis.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
 class NewsProvider(Protocol):
     def fetch(
         self, ticker: str, limit: int = 8, company_name: str | None = None
@@ -71,7 +90,14 @@ class YahooNewsProvider:
 
         items: list[NewsItem] = []
         for entry in raw:
-            item = self._to_item(entry)
+            if not isinstance(entry, dict):
+                continue
+            try:
+                item = self._to_item(entry)
+            except ValidationError:
+                # A story that does not fit the shape is dropped: the news
+                # are context, not the analysis.
+                continue
             if item is not None:
                 items.append(item)
 
@@ -82,39 +108,41 @@ class YahooNewsProvider:
     def _to_item(entry: dict) -> NewsItem | None:
         # yfinance 1.8 nests the story in "content"; older builds are flat.
         content = entry.get("content") if isinstance(entry.get("content"), dict) else entry
-        title = (content.get("title") or "").strip()
+        title = _as_text(content.get("title"))
         if not title:
             return None
 
         provider = content.get("provider")
         publisher = None
         if isinstance(provider, dict):
-            publisher = provider.get("displayName")
+            publisher = _as_text(provider.get("displayName"))
         elif isinstance(provider, str):
             publisher = provider
         if not publisher:
             # The legacy flat shape used "publisher".
-            legacy = content.get("publisher")
-            publisher = legacy if isinstance(legacy, str) else None
+            publisher = _as_text(content.get("publisher"))
 
         link = None
         for key in ("clickThroughUrl", "canonicalUrl", "previewUrl"):
             candidate = content.get(key)
             if isinstance(candidate, dict) and candidate.get("url"):
-                link = candidate["url"]
+                link = _as_text(candidate["url"])
                 break
             if isinstance(candidate, str) and candidate:
                 link = candidate
                 break
 
-        summary = content.get("summary") or content.get("description") or ""
+        summary = _as_text(content.get("summary")) or _as_text(
+            content.get("description")
+        )
 
         return NewsItem(
             title=title,
             publisher=publisher,
-            published_at=content.get("pubDate") or content.get("displayTime"),
+            published_at=_as_text(content.get("pubDate"))
+            or _as_text(content.get("displayTime")),
             link=link,
-            summary=(summary or "").strip() or None,
+            summary=summary,
         )
 
     @staticmethod

@@ -218,6 +218,11 @@ class Store:
             if item.get("title")
         ]
         with self._session() as conn:
+            if rows:
+                # The feed is replaced, not accumulated: a story that Yahoo no
+                # longer publishes would otherwise stay in the cache for good
+                # and could still be shown to the model.
+                conn.execute("DELETE FROM news WHERE ticker = ?", (ticker,))
             conn.executemany(
                 "INSERT INTO news (ticker, title, publisher, published_at, link, summary, "
                 "relevance, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "

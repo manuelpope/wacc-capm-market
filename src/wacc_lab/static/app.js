@@ -61,6 +61,29 @@ function setText(id, text) {
   if (node) node.textContent = text;
 }
 
+// A number the server did not send is not the same as a number that is zero.
+function isBlank(value) {
+  return value === null || value === undefined || Number.isNaN(value);
+}
+
+// Every request carries an id, so that an answer that arrives late cannot
+// overwrite a newer one.
+function nextRequestId() {
+  state.requestId += 1;
+  return state.requestId;
+}
+
+function isCurrent(requestId) {
+  return requestId === undefined || requestId === state.requestId;
+}
+
+// The buttons belong to the newest request: an older one that finishes late
+// must not touch them, or it would leave them disabled for good.
+function setBusy(busy) {
+  $("load-btn").disabled = busy;
+  $("refresh-btn").disabled = busy;
+}
+
 async function request(url, options = {}) {
   const response = await fetch(url, options);
   const raw = await response.text();
@@ -254,15 +277,17 @@ function renderSensitivity(grid) {
   }
 }
 
-async function loadSensitivity(ticker, useLlm) {
+async function loadSensitivity(ticker, useLlm, requestId) {
   const host = $("sensitivity");
   host.innerHTML = '<p class="news-empty">Building the grid…</p>';
   try {
     const grid = await request(
       `/api/analysis/${encodeURIComponent(ticker)}/sensitivity?use_llm=${useLlm}`
     );
+    if (!isCurrent(requestId)) return;  // a newer request won
     renderSensitivity(grid);
   } catch (err) {
+    if (!isCurrent(requestId)) return;
     const message = document.createElement("p");
     message.className = "news-empty";
     message.textContent = err.message;
@@ -343,7 +368,7 @@ function render(analysis) {
   );
   setText(
     "headline-value",
-    valuation && valuation.value_per_share
+    valuation && !isBlank(valuation.value_per_share)
       ? price(valuation.value_per_share, analysis.currency)
       : "—"
   );
@@ -384,7 +409,7 @@ function render(analysis) {
     setText("val-tv-share", pct(valuation.terminal_value_share, 1));
     setText("val-net-debt", money(valuation.net_debt, currency));
     setText("val-equity", money(valuation.equity_value, currency));
-    setText("val-per-share", valuation.value_per_share ? price(valuation.value_per_share, currency) : "—");
+    setText("val-per-share", isBlank(valuation.value_per_share) ? "—" : price(valuation.value_per_share, currency));
     setText("val-price", analysis.price ? price(analysis.price, currency) : "—");
     const upside = $("val-upside");
     if (valuation.upside_pct === null || valuation.upside_pct === undefined) {
@@ -426,24 +451,24 @@ async function analyze(ticker, refresh = false) {
     return;
   }
   state.ticker = symbol;
-  state.requestId += 1;
-  const requestId = state.requestId;
+  const requestId = nextRequestId();
   window.localStorage.setItem("wacc-lab-ticker", symbol);
-  $("load-btn").disabled = true;
-  $("refresh-btn").disabled = true;
+  setBusy(true);
   setStatus(`Loading ${symbol} from Yahoo Finance…`);
   try {
     const useLlm = $("llm-toggle").checked;
     const query = refresh ? `?refresh=true&use_llm=${useLlm}` : `?use_llm=${useLlm}`;
     const analysis = await request(`/api/analysis/${encodeURIComponent(symbol)}${query}`);
-    if (requestId !== state.requestId) return;  // a newer request won
+    if (!isCurrent(requestId)) return;  // a newer request won
     render(analysis);
-    loadSensitivity(symbol, useLlm);
+    loadSensitivity(symbol, useLlm, requestId);
   } catch (err) {
+    if (!isCurrent(requestId)) return;
     setStatus(err.message, "error");
   } finally {
-    $("load-btn").disabled = false;
-    $("refresh-btn").disabled = false;
+    if (isCurrent(requestId)) {
+      setBusy(false);
+    }
   }
 }
 
@@ -474,6 +499,8 @@ async function saveOverrides() {
     );
     return;
   }
+  // Saving supersedes whatever analysis is still on its way.
+  const requestId = nextRequestId();
   $("save-btn").disabled = true;
   try {
     const useLlm = $("llm-toggle").checked;
@@ -482,29 +509,41 @@ async function saveOverrides() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
+    if (!isCurrent(requestId)) return;
     render(analysis);
-    loadSensitivity(state.ticker, useLlm);
+    loadSensitivity(state.ticker, useLlm, requestId);
   } catch (err) {
+    if (!isCurrent(requestId)) return;
     setStatus(err.message, "error");
   } finally {
     $("save-btn").disabled = false;
+    if (isCurrent(requestId)) {
+      // Saving superseded an analysis that may have left them disabled.
+      setBusy(false);
+    }
   }
 }
 
 async function resetOverrides() {
   if (!state.ticker) return;
+  const requestId = nextRequestId();
   $("reset-btn").disabled = true;
   try {
     const useLlm = $("llm-toggle").checked;
     const analysis = await request(`/api/analysis/${encodeURIComponent(state.ticker)}/overrides?use_llm=${useLlm}`, {
       method: "DELETE"
     });
+    if (!isCurrent(requestId)) return;
     render(analysis);
-    loadSensitivity(state.ticker, useLlm);
+    loadSensitivity(state.ticker, useLlm, requestId);
   } catch (err) {
+    if (!isCurrent(requestId)) return;
     setStatus(err.message, "error");
   } finally {
     $("reset-btn").disabled = false;
+    if (isCurrent(requestId)) {
+      setBusy(false);
+    }
   }
 }
 

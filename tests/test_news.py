@@ -153,6 +153,49 @@ def test_the_provider_survives_a_yahoo_failure(monkeypatch):
         YahooNewsProvider().fetch("AAPL")
 
 
+def test_a_story_with_an_unreadable_shape_is_skipped(monkeypatch):
+    import wacc_lab.providers.news as news_module
+
+    monkeypatch.setattr(
+        news_module.yf,
+        "Ticker",
+        lambda symbol: FakeTicker(
+            [
+                {"content": {"title": {"nested": True}}},
+                {
+                    "content": {
+                        "title": "Apple announces a buyback",
+                        "summary": {"also": "nested"},
+                    }
+                },
+                "not a story at all",
+            ]
+        ),
+    )
+
+    items = YahooNewsProvider().fetch("AAPL", company_name="Apple Inc.")
+
+    # The broken stories are dropped instead of taking the analysis down.
+    assert [item.title for item in items] == ["Apple announces a buyback"]
+    assert items[0].summary is None
+
+
+def test_a_publication_date_that_is_not_a_string_is_read_as_text(monkeypatch):
+    import wacc_lab.providers.news as news_module
+
+    monkeypatch.setattr(
+        news_module.yf,
+        "Ticker",
+        lambda symbol: FakeTicker(
+            [{"content": {"title": "Apple issues bonds", "pubDate": 1700000000}}]
+        ),
+    )
+
+    items = YahooNewsProvider().fetch("AAPL")
+
+    assert items[0].published_at == "1700000000"
+
+
 # --------------------------------------------------------------- prompt context
 
 

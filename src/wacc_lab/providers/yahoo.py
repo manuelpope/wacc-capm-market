@@ -374,11 +374,20 @@ class YahooProvider:
         try:
             closes = frame["Close"].dropna()
             returns = closes.pct_change().dropna()
-            market = returns.iloc[:, 1]
+            if not isinstance(returns, pd.DataFrame) or returns.shape[1] < 2:
+                return DEFAULT_BETA, "default"
+            columns = list(returns.columns)
+            # Both series are picked by name: the order of the columns of a
+            # multi-ticker download is not guaranteed, and a beta against the
+            # wrong column is worse than no beta at all.
+            if symbol not in columns or MARKET_TICKER not in columns:
+                return DEFAULT_BETA, "default"
+            market = returns[MARKET_TICKER]
+            asset = returns[symbol]
             variance = float(market.var())
             if variance <= 0:
                 return DEFAULT_BETA, "default"
-            beta = float(returns.iloc[:, 0].cov(market) / variance)
+            beta = float(asset.cov(market) / variance)
         except Exception:
             return DEFAULT_BETA, "default"
         if not math.isfinite(beta) or beta <= 0:

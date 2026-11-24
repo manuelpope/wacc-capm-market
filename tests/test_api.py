@@ -345,6 +345,56 @@ def test_the_analyst_estimates_are_reused_instead_of_being_asked_again(tmp_path)
     assert provider.calls == ["AAPL"]
 
 
+def build_client_with_a_counted_analyst(tmp_path, response: str, fundamentals):
+    provider = FakeProvider(fundamentals)
+    store = Store(tmp_path / "test.db")
+    llm = FakeLLM(response)
+    analyst = AnalystExtractor(llm, model_label="the analyst model (test)")
+    service = AnalysisService(
+        store=store, provider=provider, ttl_hours=24, analyst=analyst
+    )
+    return TestClient(create_app(service)), llm
+
+
+def test_the_model_is_not_asked_again_when_it_declines_every_field(tmp_path):
+    gap = SAMPLE.model_copy(
+        update={
+            "roe": None,
+            "field_sources": {**SAMPLE.field_sources, "roe": "unavailable"},
+        }
+    )
+    test_client, llm = build_client_with_a_counted_analyst(
+        tmp_path, '{"roe": null}', gap
+    )
+
+    first = test_client.get("/api/analysis/AAPL")
+    second = test_client.get("/api/analysis/AAPL")
+
+    # A model that declines every field is an answer too: asking it again on
+    # every request would pay its latency for nothing.
+    assert first.json()["inputs"]["roe"] is None
+    assert second.json()["inputs"]["roe"] is None
+    assert len(llm.calls) == 1
+
+
+def test_a_failure_of_the_model_is_not_cached(tmp_path):
+    gap = SAMPLE.model_copy(
+        update={
+            "roe": None,
+            "field_sources": {**SAMPLE.field_sources, "roe": "unavailable"},
+        }
+    )
+    test_client, llm = build_client_with_a_counted_analyst(
+        tmp_path, "I cannot answer that.", gap
+    )
+
+    test_client.get("/api/analysis/AAPL")
+    test_client.get("/api/analysis/AAPL")
+
+    # The model may well be reachable on the next request.
+    assert len(llm.calls) == 2
+
+
 # ------------------------------------------------------------------ sensitivity
 
 
@@ -387,6 +437,78 @@ def test_the_sensitivity_grid_marks_a_cell_that_cannot_be_computed(client):
         if not cell["valid"]
     ]
     assert invalid, "the grid should contain at least one invalid cell"
+
+
+def test_the_sensitivity_endpoint_rejects_a_negative_span(client):
+    test_client, _ = client
+
+    response = test_client.get(
+        "/api/analysis/AAPL/sensitivity", params={"span": "-1"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_the_sensitivity_endpoint_rejects_a_zero_step(client):
+    test_client, _ = client
+
+    response = test_client.get(
+        "/api/analysis/AAPL/sensitivity", params={"step": "0"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_the_sensitivity_endpoint_rejects_a_grid_that_would_be_too_big(client):
+    test_client, _ = client
+
+    response = test_client.get(
+        "/api/analysis/AAPL/sensitivity",
+        params={"span": "10", "step": "0.0001"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_an_override_that_is_not_a_number_is_rejected(client):
+    test_client, _ = client
+
+    # Python's JSON parser accepts NaN and Infinity as literals, and they
+    # would spread through the whole model as NaN.
+    response = test_client.post(
+        "/api/analysis/AAPL/overrides",
+        content=b'{"beta": NaN}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    # The error body quotes the offending value back, and a body cannot hold
+    # an infinity, so the error itself has to stay renderable.
+    assert "beta" in response.text
+
+
+def test_an_override_of_infinity_is_rejected(client):
+    test_client, _ = client
+
+    response = test_client.post(
+        "/api/analysis/AAPL/overrides",
+        content=b'{"growth_rate": Infinity}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert "growth_rate" in response.text
+
+
+def test_a_negative_manual_growth_rate_is_reported_as_zero(client):
+    test_client, _ = client
+
+    body = test_client.post(
+        "/api/analysis/AAPL/overrides", json={"growth_rate": -0.02}
+    ).json()
+
+    assert body["growth"]["growth"] == pytest.approx(0.0)
+    assert "negative" in body["growth"]["reason"].lower()
 
 
 # ------------------------------------------------------------------ adversarial

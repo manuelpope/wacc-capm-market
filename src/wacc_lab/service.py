@@ -118,7 +118,7 @@ class AnalysisService:
             years=valuation.years,
         )
 
-        base_cell = grid.cells[grid.base_row][grid.base_column]
+        base_cell = grid.cells[grid.base_row][grid.base_column] if grid.cells else None
         return SensitivityGridModel(
             ticker=symbol,
             currency=analysis.currency,
@@ -126,8 +126,8 @@ class AnalysisService:
             base={
                 "wacc": analysis.wacc.wacc,
                 "g": analysis.growth.growth,
-                "value_per_share": base_cell.value_per_share,
-                "upside_pct": base_cell.upside_pct,
+                "value_per_share": base_cell.value_per_share if base_cell else None,
+                "upside_pct": base_cell.upside_pct if base_cell else None,
                 "price": analysis.price,
             },
             wacc_axis=grid.wacc_axis,
@@ -219,17 +219,19 @@ class AnalysisService:
             return fundamentals
 
         stored = self.store.get_llm_estimates(symbol)
-        if (
-            stored
-            and stored.get("snapshot_at") == fundamentals.fetched_at
-            and set(gaps).issubset(stored.get("values", {}))
-        ):
+        if stored and stored.get("snapshot_at") == fundamentals.fetched_at:
+            # The model already answered for this snapshot, so it is not
+            # asked again. The answer is kept even when it was empty: a model
+            # that declined every field is an answer too, and asking again on
+            # every request would pay the latency of the model for nothing.
             estimate = AnalystEstimate(
                 values=stored.get("values", {}), notes=stored.get("notes", {})
             )
         else:
             estimate = self.analyst.estimate(symbol, fundamentals, gaps, news=news)
-            if estimate.values:
+            if estimate.error is None:
+                # A failure is not cached: the model may well be reachable on
+                # the next request.
                 self.store.save_llm_estimates(
                     ticker=symbol,
                     snapshot_at=fundamentals.fetched_at,

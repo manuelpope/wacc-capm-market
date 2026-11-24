@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+import math
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import STATIC_DIR, Settings
@@ -15,6 +19,24 @@ from .providers.llm import LLMConfig, OpenAICompatibleClient
 from .providers.news import YahooNewsProvider
 from .providers.yahoo import YahooProvider
 from .service import AnalysisService
+
+
+def _without_infinities(value: object) -> object:
+    """Replace the values that JSON cannot carry.
+
+    Python's JSON parser accepts `NaN` and `Infinity` as literals, and the
+    validation error of a request that carries one quotes the offending
+    value back. A response body cannot hold an infinity, so the error itself
+    would fail to render and the client would get a 500 instead of the 422
+    that explains what is wrong.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _without_infinities(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_without_infinities(item) for item in value]
+    return value
 
 
 def build_service(settings: Settings | None = None) -> AnalysisService:
@@ -54,7 +76,7 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
 
     app = FastAPI(
         title="WACC Lab",
-        version="0.1.0",
+        version="1.0.0",
         description=(
             "Computes WACC, g and a simple DCF for Yahoo Finance tickers and "
             "stores the results in SQLite."
@@ -62,6 +84,15 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
     )
     app.state.service = active_service
     app.state.settings = settings
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": jsonable_encoder(_without_infinities(exc.errors()))},
+        )
 
     @app.get("/api/health")
     def health() -> dict[str, object]:
@@ -108,8 +139,18 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
     )
     def sensitivity(
         ticker: str,
-        span: float = Query(default=0.02, description="Half width of the grid"),
-        step: float = Query(default=0.005, description="Distance between two points"),
+        span: float = Query(
+            default=0.02,
+            ge=0.001,
+            le=0.25,
+            description="Half width of the grid",
+        ),
+        step: float = Query(
+            default=0.005,
+            ge=0.0005,
+            le=0.05,
+            description="Distance between two points",
+        ),
         use_llm: bool = Query(default=True),
     ) -> SensitivityGridModel:
         try:
@@ -120,6 +161,9 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ValueError as exc:
+            # The grid cannot be built with those parameters.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post("/api/analysis/{ticker}/overrides", response_model=AnalysisResult)
     def set_overrides(

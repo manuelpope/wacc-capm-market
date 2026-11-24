@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import math
+
+from pydantic import BaseModel, Field, field_validator
 
 # Bumped whenever the shape of a snapshot changes, so a snapshot written by
 # an older version is refreshed instead of being read with missing fields.
@@ -60,6 +62,20 @@ class Overrides(BaseModel):
     growth_rate: float | None = None
     base_fcf: float | None = None
     projection_years: int | None = None
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _has_to_be_finite(cls, value: object) -> object:
+        """Reject NaN and infinity.
+
+        The JSON parser of Python accepts `NaN` and `Infinity` as literals,
+        so a request can carry them. They would then spread through the whole
+        model: every number of the answer would become a NaN and the response
+        would look successful while saying nothing.
+        """
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("an override has to be a finite number")
+        return value
 
 
 class CacheInfo(BaseModel):

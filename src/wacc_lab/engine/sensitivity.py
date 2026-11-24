@@ -22,6 +22,12 @@ DEFAULT_SPAN = 0.02
 DEFAULT_STEP = 0.005
 DEFAULT_MIN_SPREAD = 0.03
 
+# The grid is a matrix of valuations, so its size has to be bounded: the
+# span and the step arrive as query parameters and a careless pair of them
+# would ask for millions of cells.
+MAX_AXIS_LENGTH = 401
+MAX_CELLS = 160_000
+
 
 @dataclass(frozen=True)
 class SensitivityCell:
@@ -44,7 +50,16 @@ class SensitivityGrid:
 
 
 def _axis(base: float, span: float, step: float) -> list[float]:
-    half = int(round(span / step))
+    if step <= 0:
+        raise ValueError("the step of the grid has to be positive")
+    if span <= 0:
+        raise ValueError("the span of the grid has to be positive")
+    half = round(span / step)
+    if 2 * half + 1 > MAX_AXIS_LENGTH:
+        raise ValueError(
+            f"the grid would have {2 * half + 1} points per axis, the limit is "
+            f"{MAX_AXIS_LENGTH}"
+        )
     # The values are not rounded: the base of the axis has to be exactly the
     # base of the valuation, so that the base cell is that valuation.
     return [base + offset * step for offset in range(-half, half + 1)]
@@ -67,6 +82,11 @@ def compute_sensitivity(
 
     wacc_axis = _axis(base_wacc, span, step)
     g_axis = _axis(base_growth, span, step)
+    if len(wacc_axis) * len(g_axis) > MAX_CELLS:
+        raise ValueError(
+            f"the grid would have {len(wacc_axis) * len(g_axis)} cells, the limit "
+            f"is {MAX_CELLS}"
+        )
     base_row = len(g_axis) // 2
     base_column = len(wacc_axis) // 2
 

@@ -47,6 +47,18 @@ def test_the_news_are_cached_and_read_back(tmp_path):
     assert news[0]["relevance"] == 2
 
 
+def test_the_news_are_replaced_and_not_accumulated(tmp_path):
+    store = Store(tmp_path / "test.db")
+
+    store.save_news("AAPL", [{"title": "A story", "relevance": 2}])
+    store.save_news("AAPL", [{"title": "Another story", "relevance": 1}])
+
+    news = store.get_news("AAPL")
+
+    # A story that Yahoo no longer publishes must not stay in the cache.
+    assert [item["title"] for item in news] == ["Another story"]
+
+
 def test_an_outdated_snapshot_is_not_read(tmp_path):
     import json
     import sqlite3

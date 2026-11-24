@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from wacc_lab.engine.growth import GrowthInputs, compute_growth
+from wacc_lab.engine.growth import GrowthInputs, apply_growth_caps, compute_growth
 from wacc_lab.engine.valuation import ValuationInputs, compute_valuation
 from wacc_lab.engine.wacc import WaccInputs, compute_wacc
 
@@ -158,6 +158,26 @@ def test_growth_is_zero_when_inputs_are_missing():
     assert result.growth == pytest.approx(0.0)
     assert result.capped is True
     assert "data" in result.reason.lower()
+
+
+def test_a_negative_growth_rate_is_reported_as_such():
+    # The reason has to name the real cause: the WACC was not the problem.
+    growth, reasons, _warnings = apply_growth_caps(
+        -0.02, wacc=0.10, ceiling=None
+    )
+
+    assert growth == pytest.approx(0.0)
+    assert any("negative" in reason.lower() for reason in reasons)
+    assert not any("wacc" in reason.lower() for reason in reasons)
+
+
+def test_a_wacc_below_the_minimum_spread_is_reported_as_such():
+    growth, reasons, _warnings = apply_growth_caps(
+        0.05, wacc=0.01, ceiling=None
+    )
+
+    assert growth == pytest.approx(0.0)
+    assert any("wacc" in reason.lower() for reason in reasons)
 
 
 # ---------------------------------------------------------------------- valuation

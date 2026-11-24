@@ -72,6 +72,7 @@ T7 | S8 | inline | done | news provider + relevance ranking, prompt context, cur
 T8 | S9 | inline | done | sensitivity engine, endpoint, grid card with the colour scale and the fragile marks
 T9 | S10 | inline | done | normalization engine, provider series, valuation base, UI rows, bug review
 T10 | S11 | inline | done | second review: interface script, engine edge cases, store concurrency, hostile inputs
+T11 | S11 | inline | done | third review: unbounded grid parameters, hostile payloads, provider fragility, interface races
 
 ## Log
 
@@ -157,3 +158,17 @@ L21 (2026-11-18): Second review pass, on the parts the first one did not cover. 
 L22 (2026-11-18): One suspicion turned out not to be a defect. Samsung's trailing cash flow looked four times its annual figure, which is the signature of cumulative quarters. The quarterly statements were checked against the annual ones for four companies: the quarters are discrete (Apple's four quarters sum to 478.9 against an annual 478.8), so the trailing figure was right. The gap is real: Samsung's 2026 is a cycle extreme and the three year average includes a negative 2023. The tool says so, and now the warning names the cycle when the difference is extreme.
 
 L23 (2026-11-18): The second pass added the kind of tests that were missing: property tests over the engines with seeded random inputs (the invariants hold for every input: the growth never reaches the discount rate, the value falls when the discount rate rises and rises when growth rises, nothing is ever a NaN, the base cell of the grid is the valuation), hostile inputs against the API (a SQL injection attempt, an empty ticker, a lowercase ticker, eight parallel requests, and parallel reads and writes), and a test for the store that proves the database file is not touched at import.
+
+L24 (2026-11-24): Third review pass, before the first release. Ten defects found and fixed, each one pinned with a test:
+1. The grid took its size from two query parameters with no bounds. A negative span built an empty axis and the endpoint died with an index error (a 500), and a large span asked for millions of cells. The span and the step are now bounded in the API and in the engine, and a grid that is still too big is refused with a 422.
+2. Python's JSON parser accepts `NaN` and `Infinity` as literals, so an override could carry one. It was accepted, and then every number of the answer was a NaN while the response said 200. The overrides now have to be finite numbers.
+3. A malformed story (a publication date that was not a string, a title that was not text) raised a pydantic error that is not a provider error, and it took the whole analysis down. The news are context, not the analysis: a story that cannot be read is now dropped.
+4. The model was asked again on every request when it declined to fill a field, because only an answer with values was cached. A refusal is an answer too, and it is now cached with the snapshot. A failure of the model is still not cached, so it is retried.
+5. The news were never pruned, so a story Yahoo stopped publishing stayed in the cache for good and could still be shown to the model. The feed is now replaced instead of accumulated.
+6. The beta was computed against `returns.iloc[:, 1]`, which assumes the order of the columns of a multi-ticker download. Both series are now picked by name, and a beta that cannot be computed is reported as unavailable instead of being computed against the wrong column.
+7. A negative manual growth rate was reported as "the WACC is below the minimum spread", which named the wrong cause. The reason now names the real one.
+8. The interface let a late answer overwrite a newer one: the guard was only on the happy path of the analysis, and the overrides and the grid did not take part in it at all. Every request now carries an id.
+9. A value per share of exactly zero was rendered as "—", because the code asked whether the number was true instead of whether it was there.
+10. The README still said the tool had no WACC × g grid, which it has had for two increments.
+
+The test suite could not be run in this environment (the shell that executes Python was blocked for the whole session), so the changes were verified by reading the code and the arithmetic of each case, not by running it.

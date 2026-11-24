@@ -139,3 +139,64 @@ def test_the_grid_reports_the_span_it_used():
     assert len(grid.wacc_axis) == 5
     assert grid.wacc_axis[0] == pytest.approx(0.09)
     assert grid.span == pytest.approx(0.01)
+
+
+# ------------------------------------------------------------------ the limits
+
+
+def test_a_negative_span_is_rejected():
+    # A negative span used to build an empty axis, and the empty grid then
+    # made the endpoint fail with an index error.
+    with pytest.raises(ValueError):
+        compute_sensitivity(
+            base_fcf=100.0,
+            net_debt=0.0,
+            shares_outstanding=10.0,
+            current_price=20.0,
+            base_wacc=0.10,
+            base_growth=0.03,
+            span=-0.01,
+        )
+
+
+def test_a_zero_step_is_rejected():
+    with pytest.raises(ValueError):
+        compute_sensitivity(
+            base_fcf=100.0,
+            net_debt=0.0,
+            shares_outstanding=10.0,
+            current_price=20.0,
+            base_wacc=0.10,
+            base_growth=0.03,
+            step=0.0,
+        )
+
+
+def test_a_grid_that_would_be_too_big_is_rejected():
+    with pytest.raises(ValueError):
+        compute_sensitivity(
+            base_fcf=100.0,
+            net_debt=0.0,
+            shares_outstanding=10.0,
+            current_price=20.0,
+            base_wacc=0.10,
+            base_growth=0.03,
+            span=1.0,
+            step=0.0001,
+        )
+
+
+def test_a_normal_grid_is_still_built():
+    grid = compute_sensitivity(
+        base_fcf=100.0,
+        net_debt=0.0,
+        shares_outstanding=10.0,
+        current_price=20.0,
+        base_wacc=0.10,
+        base_growth=0.03,
+        span=0.02,
+        step=0.005,
+    )
+
+    assert len(grid.wacc_axis) == 9
+    assert len(grid.cells) == 9
