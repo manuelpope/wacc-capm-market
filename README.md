@@ -44,6 +44,19 @@ The test suite never touches the network: the API tests inject a fake provider.
 
 ---
 
+## The documentation
+
+There is a wiki in [`docs/`](docs/), written as plain HTML with no build step:
+nine pages that cover the quick start, the methodology, the analyst fallback,
+the sensitivity grid, the interface, the API, the architecture and the honest
+list of what the tool cannot do.
+
+While the server is running it is served at
+<http://127.0.0.1:8000/wiki/> (FastAPI keeps `/docs` for its own interactive
+documentation), and the pages can also be opened straight from the filesystem.
+
+---
+
 ## How it works
 
 ### 1. Where the inputs come from

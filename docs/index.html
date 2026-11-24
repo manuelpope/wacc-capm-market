@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Overview — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="index">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>WACC Lab</h1>
+    <p class="lead">
+      A FastAPI tool that computes the weighted average cost of capital, the
+      sustainable growth rate and a deliberately simple DCF for any Yahoo Finance
+      ticker, keeps the answers in SQLite, and shows you how much of the result
+      depends on the two assumptions that carry the most weight.
+    </p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Pick a ticker</h3>
+        <p>A curated catalog of 69 well-known tickers, or any symbol Yahoo
+        knows, typed by hand.</p>
+      </div>
+      <div class="card">
+        <h3>Compute</h3>
+        <p>WACC, g and a value per share, with every input visible and every
+        one of them overridable.</p>
+      </div>
+      <div class="card">
+        <h3>Persist</h3>
+        <p>SQLite. A second request for the same ticker is served from the
+        cache; a stale one is recomputed.</p>
+      </div>
+      <div class="card">
+        <h3>Question it</h3>
+        <p>A WACC x g grid that shows how much of the answer is arithmetic and
+        how much is assumption.</p>
+      </div>
+    </div>
+
+    <h2>The flow</h2>
+    <p>
+      The whole thing is five steps, and each one is a separate unit that can be
+      read on its own:
+    </p>
+    <ol>
+      <li><strong>The provider</strong> pulls the quote profile and the quarterly
+      and annual statements from Yahoo Finance through <code>yfinance</code>.</li>
+      <li><strong>The store</strong> decides whether the snapshot is fresh, stale
+      or missing, and fetches it again when it has to.</li>
+      <li><strong>The engines</strong> turn the raw facts into a WACC, a growth
+      rate and a valuation. They are pure functions, and they never touch the
+      network.</li>
+      <li><strong>The analyst</strong>, when Yahoo could not supply a number,
+      asks a local model for the gap — and only the gap.</li>
+      <li><strong>The interface</strong> shows the result, the warnings, the
+      news and the grid, and lets you override anything you disagree with.</li>
+    </ol>
+
+    <h2>What comes out</h2>
+    <p>
+      For a live analysis of Apple, the tool reported a WACC of 10.27%, a growth
+      rate of 5% (capped, because the raw figure was 106%) and a value per share
+      of $155.34 against a market price of $351.47. The last two facts are the
+      interesting ones: the growth rate is not a forecast, and the gap between
+      the model and the market is not an error — it is the output.
+    </p>
+
+    <div class="note info">
+      <span class="label">Read this first</span>
+      <p>
+        This is a teaching-grade model on purpose: one cash flow base, one
+        growth rate, one discount rate, one horizon. It is not a full
+        three-statement DCF, and it says so. The
+        <a href="limits.html">honest list of what it cannot do</a> is the most
+        useful page in this wiki.
+      </p>
+    </div>
+
+    <h2>The three ideas</h2>
+
+    <h3>1. The caps are policy, and they are visible</h3>
+    <p>
+      A perpetual growth rate above long-run nominal GDP is not sustainable, so
+      <code>g</code> is capped at 5%. A narrow gap between the discount rate and
+      the growth rate makes the Gordon denominator explode, so at least 3% is
+      kept between them. Both caps report why they fired, and both appear in
+      the sensitivity grid as the fragile corner of the table.
+    </p>
+
+    <h3>2. The base cash flow is normalized</h3>
+    <p>
+      The valuation grows from the average of the last three fiscal years, not
+      from the trailing twelve months. The trailing figure carries the noise of
+      one unusual quarter, and the model then grows that number for five years.
+      Both are shown, and when they differ by more than 25% the tool says which
+      way and by how much.
+    </p>
+
+    <h3>3. A single number hides the interesting part</h3>
+    <p>
+      The WACC x g grid answers the question a single value per share cannot:
+      how much of this number depends on the two assumptions that carry the
+      most weight? For Apple the grid runs from $100.65 to $698.88 around a base
+      case, and the most optimistic corners are exactly the fragile ones.
+    </p>
+
+    <h2>The stack</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Piece</th><th>What it is</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>FastAPI</th><td>The API and the static interface</td><td>One process, no build step</td></tr>
+          <tr><th>yfinance</th><td>The data</td><td>It is the only free source that has both the quote profile and the statements</td></tr>
+          <tr><th>Pydantic</th><td>The shapes of the answers</td><td>The response of the API is a model, not a dictionary</td></tr>
+          <tr><th>SQLite</th><td>The cache and the overrides</td><td>One file, no server, no schema migration story</td></tr>
+          <tr><th>uv</th><td>The environment</td><td><code>uv.lock</code> pins the versions this release was verified against</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="next-links">
+      <a href="quickstart.html">Quick start</a>
+      <a href="methodology.html">How the numbers are computed</a>
+      <a href="limits.html">What it cannot do</a>
+    </div>
+
+    <p class="page-foot">
+      WACC Lab v1.0.0 · the source and the README are in the repository, and
+      the design decisions are recorded in
+      <code>odd/tasks/wacc-valuation-lab.md</code>.
+    </p>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

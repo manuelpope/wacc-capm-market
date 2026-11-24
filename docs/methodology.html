@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Methodology — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="methodology">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>Methodology</h1>
+    <p class="lead">
+      Every number the tool shows comes from one of four places: Yahoo Finance,
+      a documented default, a cap that is applied on purpose, or the analyst
+      model. This page says which is which, and why.
+    </p>
+
+    <h2>1. Where the inputs come from</h2>
+    <p>
+      Everything is pulled from Yahoo Finance through <code>yfinance</code>: the
+      quote profile plus the quarterly income, balance and cash-flow statements,
+      with the annual statements as a fallback.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Input</th><th>How it is computed</th><th>Fallback</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Risk-free rate</th>
+            <td><code>^TNX</code>, the 10-year Treasury yield</td>
+            <td>4.0%, with a warning</td>
+          </tr>
+          <tr>
+            <th>Beta</th>
+            <td><code>info["beta"]</code>, then a 5-year monthly beta against
+            <code>^GSPC</code></td>
+            <td>1.0, labelled <span class="chip">default</span></td>
+          </tr>
+          <tr>
+            <th>Cost of equity</th>
+            <td>CAPM: <code>Rf + β × ERP</code>, with ERP = 5.00%</td>
+            <td>Overridable by hand</td>
+          </tr>
+          <tr>
+            <th>Cost of debt</th>
+            <td>Interest expense ÷ total debt</td>
+            <td><code>Rf + 1.5%</code>, and the analyst model is asked</td>
+          </tr>
+          <tr>
+            <th>Tax rate</th>
+            <td>Tax provision ÷ pre-tax income, trailing twelve months</td>
+            <td><code>info["taxRate"]</code>, then 21%</td>
+          </tr>
+          <tr>
+            <th>Capital structure</th>
+            <td>Total debt against market cap:
+            <code>wd = D / (D + E)</code></td>
+            <td>Book equity, then all debt or all equity</td>
+          </tr>
+          <tr>
+            <th>ROE</th>
+            <td>TTM net income ÷ average book equity</td>
+            <td>The analyst model is asked</td>
+          </tr>
+          <tr>
+            <th>Retention ratio</th>
+            <td><code>1 − (dividends ÷ net income)</code></td>
+            <td>The last fiscal year, then 1.0 with a warning</td>
+          </tr>
+          <tr>
+            <th>Free cash flow</th>
+            <td>The annual <code>Free Cash Flow</code> series, and the trailing
+            twelve months</td>
+            <td>Operating cash flow + capex</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn">
+      <span class="label">Why ROE is recomputed</span>
+      <p>
+        Yahoo's <code>returnOnEquity</code> is inflated for companies that buy
+        back stock — Apple reports around 142%. The tool therefore recomputes
+        ROE from trailing net income over average book equity, which is closer
+        to the textbook definition. It is still inflated for a company that is
+        shrinking its equity, and the growth cap exists partly because of that.
+      </p>
+    </div>
+
+    <div class="note warn">
+      <span class="label">Two data traps that are handled explicitly</span>
+      <p>
+        <code>^TNX</code> is quoted in percent, but legacy Yahoo quoting
+        multiplied it by ten (51.0 means 5.10%), so the value is normalized
+        defensively. And a company that pays no dividend — Berkshire Hathaway —
+        has no dividend row at all, which is not the same as a zero: the
+        retention ratio falls back to 1.0 with an explicit warning.
+      </p>
+    </div>
+
+    <h2>2. The growth rate</h2>
+    <p>
+      By default <code>g = ROE × retention ratio</code>: the growth the current
+      returns can fund from the profit it keeps. The raw figure is almost always
+      unusable on its own, so it is capped twice, and every cap reports why it
+      fired.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Cap</th><th>Rule</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>The ceiling</th>
+            <td><code>g ≤ 5%</code></td>
+            <td>A perpetual rate above long-run nominal GDP is not
+            sustainable.</td>
+          </tr>
+          <tr>
+            <th>The minimum spread</th>
+            <td><code>WACC − g ≥ 3%</code></td>
+            <td>A narrow gap makes the Gordon denominator explode and puts
+            almost the whole value in the terminal value.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      A manual growth rate is not subject to the ceiling — you are allowed to
+      believe something else — but it still obeys the minimum spread, and the
+      interface says that it was capped.
+    </p>
+
+    <div class="note info">
+      <span class="label">What the caps did in practice</span>
+      <p>
+        The first run of this tool priced Apple at $2,190 a share against a
+        $351 quote: a 10% growth ceiling and a 10.47% WACC left a 0.47%
+        denominator and a terminal value of 234 times the cash flow. Exxon made
+        the same point differently — a genuinely low beta of 0.14 gave a 5.62%
+        WACC, and a 5% growth left a 0.62% spread, which put 97% of the
+        enterprise value in the terminal value. After the fixes, Exxon's growth
+        is 2.62% and its terminal value share is 87%, and both facts are
+        reported.
+      </p>
+    </div>
+
+    <h2>3. The normalized free cash flow</h2>
+    <p>
+      The base cash flow is the <strong>average of the last three fiscal
+      years</strong>, not the trailing twelve months. The trailing figure
+      carries the noise of a single unusual quarter — a tax payment, a working
+      capital squeeze, a restructuring — and the model then grows that number
+      for five years.
+    </p>
+    <p>
+      Both figures stay visible in the interface. When they differ by more than
+      25% the tool says which way and by how much, and when the difference is
+      extreme it says that the trailing figure looks like a cycle extreme and
+      that the normalized base is the one to question.
+    </p>
+    <p>
+      The effect is not cosmetic: Apple's base drops from $136.06B to $114.54B
+      and the value per share from $179.43 to $151.53, and Exxon's base drops
+      from $42.96B to $29.26B.
+    </p>
+
+    <h3>Where the trailing figure comes from</h3>
+    <p>
+      The quarterly <code>Free Cash Flow</code> line, summed over the last four
+      quarters. Some companies report fewer than four quarters, and a sum of
+      fewer is not a year: the provider counts the quarters it used and says so
+      in the warnings.
+    </p>
+
+    <h2>4. The valuation</h2>
+    <p>A deliberately simple FCFF-style DCF:</p>
+    <pre><code>FCF_t      = FCF_0 × (1 + g)^t
+PV explicit = Σ FCF_t / (1 + WACC)^t          for t = 1..5
+TV          = FCF_5 × (1 + g) / (WACC − g)
+EV          = PV explicit + TV / (1 + WACC)^5
+Equity      = EV − net debt
+Value/share = Equity / shares outstanding</code></pre>
+
+    <p>And the things the tool refuses to hide:</p>
+    <ul>
+      <li>The <strong>terminal value share</strong> of the enterprise value is
+      displayed. Above 85% the result lives almost entirely on the perpetuity
+      assumption, and the tool says so.</li>
+      <li>A <strong>negative base cash flow</strong> reports no value per share
+      at all. A growing perpetuity on a negative base is always negative: the
+      number would be arithmetic, not valuation.</li>
+      <li>An <strong>extreme implied upside</strong> (more than 500%) is
+      reported, because at that point the model is more sensitive to g and the
+      WACC than to the price.</li>
+      <li>A <strong>negative equity value</strong> is reported: net debt
+      exceeds the enterprise value.</li>
+    </ul>
+
+    <h2>The shape of a response</h2>
+    <p>
+      Every answer carries the same four things, so a client never has to guess:
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Key</th><th>What it holds</th></tr>
+        </thead>
+        <tbody>
+          <tr><th><code>wacc</code></th><td>The cost of equity, the after-tax cost of debt, the weights and the WACC</td></tr>
+          <tr><th><code>growth</code></th><td>The raw growth, the growth that was used, whether it was capped and why</td></tr>
+          <tr><th><code>valuation</code></th><td>The base cash flow, the projection, the terminal value, the equity value and the value per share</td></tr>
+          <tr><th><code>warnings</code></th><td>Every default, every cap and every caveat, in words</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="next-links">
+      <a href="sensitivity.html">The WACC x g grid</a>
+      <a href="analyst.html">When Yahoo has no answer</a>
+      <a href="limits.html">What it cannot do</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import STATIC_DIR, Settings
+from .config import STATIC_DIR, WIKI_DIR, Settings
 from .db import Store
 from .models import AnalysisResult, Overrides, SensitivityGridModel
 from .providers.analyst import AnalystExtractor
@@ -191,6 +191,11 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
         @app.get("/", include_in_schema=False)
         def index() -> FileResponse:
             return FileResponse(STATIC_DIR / "index.html")
+
+    if WIKI_DIR.is_dir():
+        # The wiki is served next to the interface. FastAPI keeps /docs for
+        # its own interactive documentation.
+        app.mount("/wiki", StaticFiles(directory=str(WIKI_DIR), html=True), name="wiki")
 
     return app
 

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>API — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="api">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>API</h1>
+    <p class="lead">
+      Six routes. The interactive documentation is at
+      <code>/docs</code> while the server is running.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Route</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>GET</th>
+            <td><code>/api/tickers</code></td>
+            <td>The curated universe: 69 tickers, grouped by sector</td>
+          </tr>
+          <tr>
+            <th>GET</th>
+            <td><code>/api/analysis/{ticker}</code></td>
+            <td>The full analysis</td>
+          </tr>
+          <tr>
+            <th>GET</th>
+            <td><code>/api/analysis/{ticker}/sensitivity</code></td>
+            <td>The WACC x g grid</td>
+          </tr>
+          <tr>
+            <th>POST</th>
+            <td><code>/api/analysis/{ticker}/overrides</code></td>
+            <td>Saves manual inputs and recomputes</td>
+          </tr>
+          <tr>
+            <th>DELETE</th>
+            <td><code>/api/analysis/{ticker}/overrides</code></td>
+            <td>Drops the overrides and goes back to automatic</td>
+          </tr>
+          <tr>
+            <th>GET</th>
+            <td><code>/api/health</code></td>
+            <td>The database path, the cache TTL and the analyst configuration</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Query parameters</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Parameter</th><th>Where</th><th>Default</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr><th><code>refresh</code></th><td>the analysis</td><td><code>false</code></td><td>Forces a recompute from Yahoo, whatever the cache says</td></tr>
+          <tr><th><code>use_llm</code></th><td>every analysis route</td><td><code>true</code></td><td>Lets the analyst model fill the missing inputs and load the news</td></tr>
+          <tr><th><code>span</code></th><td>the grid</td><td><code>0.02</code></td><td>The half width of the grid, between 0.001 and 0.25</td></tr>
+          <tr><th><code>step</code></th><td>the grid</td><td><code>0.005</code></td><td>The distance between two points, between 0.0005 and 0.05</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Overrides</h2>
+    <p>
+      <code>POST /api/analysis/{ticker}/overrides</code> accepts any subset of
+      these:
+    </p>
+    <pre><code>{
+  "beta": 1.2,
+  "risk_free_rate": 0.045,
+  "equity_risk_premium": 0.055,
+  "pretax_cost_of_debt": 0.055,
+  "tax_rate": 0.25,
+  "debt_weight": 0.15,
+  "growth_rate": 0.03,
+  "base_fcf": 1.2e10,
+  "projection_years": 5
+}</code></pre>
+
+    <div class="note warn">
+      <span class="label">Every override has to be a finite number</span>
+      <p>
+        Python's JSON parser accepts <code>NaN</code> and <code>Infinity</code>
+        as literals, so a request can carry them. They are refused with a
+        <code>422</code>: a single one of them would turn every number of the
+        answer into a NaN while the response still said 200. The error body is
+        itself valid JSON, which is why the offending value comes back as the
+        string <code>"nan"</code>.
+      </p>
+    </div>
+
+    <h2>The answer</h2>
+    <p>
+      The response of <code>/api/analysis/{ticker}</code> is a fixed shape, so a
+      client never has to guess:
+    </p>
+    <pre><code>{
+  "ticker": "AAPL",
+  "name": "Apple Inc.",
+  "sector": "Technology",
+  "currency": "USD",
+  "price": 351.475,
+  "cache": {
+    "status": "computed",
+    "snapshot_at": "2026-11-24T13:40:12+00:00",
+    "computed_at": "2026-11-24T13:40:14+00:00",
+    "ttl_hours": 24.0
+  },
+  "inputs":        { "risk_free_rate": 0.0451, "beta": 1.12, ... },
+  "field_sources": { "beta": "yahoo", "roe": "llm", ... },
+  "overrides":     null,
+  "wacc":    { "cost_of_equity": 0.1011, "wacc": 0.1027, ... },
+  "growth":  { "raw_growth": 1.061, "growth": 0.05, "capped": true, "reason": "..." },
+  "valuation": { "base_fcf": 114540000000, "value_per_share": 155.33, ... },
+  "news":    [ { "title": "...", "publisher": "...", "published_at": "..." } ],
+  "warnings": [ "..." ]
+}</code></pre>
+
+    <p>The things worth knowing about it:</p>
+    <ul>
+      <li><code>cache.status</code> is one of <code>computed</code>,
+      <code>fresh</code>, <code>stale</code> or <code>refreshed</code>.</li>
+      <li><code>field_sources</code> says where every field came from:
+      <code>yahoo</code>, a named fallback, or <code>llm</code>.</li>
+      <li><code>growth.reason</code> explains every cap that fired.</li>
+      <li><code>valuation</code> is <code>null</code> when it could not be
+      computed, and the reason is in the warnings.</li>
+      <li><code>warnings</code> is the honest part. Read it before the
+      numbers.</li>
+    </ul>
+
+    <h2>Status codes</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>When</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>200</th><td>The analysis, the grid or the overrides came back</td></tr>
+          <tr><th>404</th><td>Yahoo Finance does not know the ticker</td></tr>
+          <tr><th>422</th><td>The request itself is wrong: an unknown field, a non-finite number, a grid that is too big</td></tr>
+          <tr><th>502</th><td>Yahoo Finance could not be reached</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="next-links">
+      <a href="quickstart.html">Quick start</a>
+      <a href="methodology.html">Methodology</a>
+      <a href="architecture.html">Architecture</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

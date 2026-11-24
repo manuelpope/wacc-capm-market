@@ -13,6 +13,9 @@ DEFAULT_TTL_HOURS = 24.0
 DEFAULT_LLM_BASE_URL = "http://127.0.0.1:11434/v1"
 DEFAULT_LLM_MODEL = "qwen3.5:9b-mlx"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# The HTML wiki. It lives in the repository, so it is not part of the wheel,
+# and the mount is skipped when it is not there.
+WIKI_DIR = PROJECT_ROOT / "docs"
 
 
 @dataclass(frozen=True)

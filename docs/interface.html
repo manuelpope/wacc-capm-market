@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The interface — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="interface">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>The interface</h1>
+    <p class="lead">
+      One page, no build step. Pick a ticker, read the result, override what you
+      disagree with.
+    </p>
+
+    <h2>The cards</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Card</th><th>What it holds</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Summary</th><td>The company, the WACC, the growth rate and the value per share, with the current price next to it</td></tr>
+          <tr><th>WACC</th><td>The risk-free rate, the equity risk premium, the beta, the cost of equity, the cost of debt, the tax rate and the weights — the full decomposition</td></tr>
+          <tr><th>Growth</th><td>The method, the ROE, the retention ratio, the raw g, whether it was capped and why</td></tr>
+          <tr><th>Valuation</th><td>The base cash flow, the projection, the terminal value, the enterprise value, the equity value, the value per share and the upside</td></tr>
+          <tr><th>Inputs</th><td>Every automatic value and an empty box next to it</td></tr>
+          <tr><th>Sensitivity</th><td>The WACC x g grid</td></tr>
+          <tr><th>Recent news</th><td>The headlines the analyst model reads</td></tr>
+          <tr><th>Warnings</th><td>Everything the tool wants you to know before you read the numbers</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>The units</h2>
+    <p>
+      Every monetary value is shown with the currency of the ticker — never as
+      a raw number:
+    </p>
+    <ul>
+      <li><code>$136.06B</code> for a hundred and thirty-six billion</li>
+      <li><code>$3.36T</code> for three point three six trillion</li>
+      <li><code>$179.43</code> for a price</li>
+    </ul>
+    <p>
+      The currency comes from the quote profile and is carried through the whole
+      response, so a client can format the numbers the same way the interface
+      does.
+    </p>
+
+    <h2>The overrides</h2>
+    <p>
+      Every automatic value in the inputs table has an empty box next to it.
+      Type a number, press <strong>Save overrides &amp; recompute</strong>, and
+      the answer is recomputed with your number in place of the automatic one.
+      The overrides are stored per ticker, so they survive a restart.
+    </p>
+    <p>
+      <strong>Reset to automatic</strong> drops them and goes back to what Yahoo
+      says. The percentages are typed as percentages (<code>4.5</code> means
+      4.5%, not 0.045), and a value that cannot be read is named in the status
+      line instead of being ignored.
+    </p>
+
+    <div class="note info">
+      <span class="label">Which values can be overridden</span>
+      <p>
+        The beta, the risk-free rate, the equity risk premium, the pre-tax cost
+        of debt, the tax rate, the debt weight, the growth rate, the base free
+        cash flow and the projection horizon. The capital structure, the share
+        count and the net debt come from the provider and are not editable —
+        they are facts about the company, not assumptions.
+      </p>
+    </div>
+
+    <h2>The status line</h2>
+    <p>
+      It always says where the answer came from, and it is the first thing to
+      read when two numbers disagree:
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>It says</th><th>It means</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>computed and stored</code></td><td>Yahoo was asked and the answer was stored</td></tr>
+          <tr><td><code>served from the SQLite cache</code></td><td>The stored snapshot was still fresh</td></tr>
+          <tr><td><code>cached snapshot was stale, recomputed</code></td><td>The snapshot was older than the TTL</td></tr>
+          <tr><td><code>recomputed from Yahoo Finance</code></td><td><strong>Refresh from Yahoo</strong> was pressed</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>The behaviour under pressure</h2>
+    <ul>
+      <li>Two requests can be in flight at once: the one that answers last is
+      not the one that paints the screen. Every request carries an id, and the
+      interface only draws the answer of the newest one.</li>
+      <li>The same rule applies to the overrides and to the grid, so a slow grid
+      can never overwrite a fresh analysis.</li>
+      <li>The error message and the grid warning are rendered as text, never as
+      HTML, so a hostile ticker cannot inject anything into the page.</li>
+    </ul>
+
+    <div class="next-links">
+      <a href="quickstart.html">Quick start</a>
+      <a href="methodology.html">Methodology</a>
+      <a href="api.html">API reference</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

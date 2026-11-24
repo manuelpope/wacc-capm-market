@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quick start — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="quickstart">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>Quick start</h1>
+    <p class="lead">
+      Install it, run it, open it. Nothing else is needed: the analyst model is
+      optional and the tool works without it.
+    </p>
+
+    <h2>Install</h2>
+    <p>Python 3.11 or newer, and <code>uv</code>:</p>
+    <pre><code>cd projects/wacc-lab
+uv venv --python 3.13
+uv sync --extra dev            # or: uv pip install -e ".[dev]"</code></pre>
+    <p>
+      <code>uv.lock</code> is committed, so <code>uv sync</code> installs the
+      exact set of versions this release was verified against.
+    </p>
+
+    <h2>Run</h2>
+    <pre><code>.venv/bin/python -m uvicorn wacc_lab.api:app --reload</code></pre>
+    <p>Then open <a href="http://127.0.0.1:8000">http://127.0.0.1:8000</a>.</p>
+
+    <div class="note info">
+      <span class="label">The first request is slow</span>
+      <p>
+        The first analysis of a ticker downloads its statements from Yahoo
+        Finance, which takes a few seconds. Every later request for the same
+        ticker is served from SQLite in milliseconds, until the snapshot goes
+        stale.
+      </p>
+    </div>
+
+    <h2>Try the API</h2>
+    <pre><code># the curated universe
+curl http://127.0.0.1:8000/api/tickers
+
+# a full analysis
+curl "http://127.0.0.1:8000/api/analysis/AAPL"
+
+# without the analyst model and without the news
+curl "http://127.0.0.1:8000/api/analysis/AAPL?use_llm=false"
+
+# the WACC x g grid
+curl "http://127.0.0.1:8000/api/analysis/AAPL/sensitivity"</code></pre>
+
+    <h2>Run the tests</h2>
+    <pre><code>.venv/bin/python -m pytest -q</code></pre>
+    <p>
+      The suite never touches the network: the API tests inject a fake provider
+      and a fake model, and the engine tests are pure.
+    </p>
+
+    <h2>Configuration</h2>
+    <p>Everything is read from the environment, and every variable has a default.</p>
+
+    <h3>The store and the cache</h3>
+    <pre><code>WACC_LAB_DB=/path/to/db.sqlite       # default: data/wacc_lab.db
+WACC_LAB_TTL_HOURS=24                # default: 24</code></pre>
+
+    <h3>The analyst model</h3>
+    <pre><code>export WACC_LAB_LLM_BASE_URL=http://127.0.0.1:11434/v1   # Ollama, llmlite, llama.cpp, OpenAI
+export WACC_LAB_LLM_MODEL=qwen3.5:9b-mlx
+export WACC_LAB_LLM_API_KEY=                               # only for hosted providers
+export WACC_LAB_LLM_TIMEOUT=180
+export WACC_LAB_LLM_MODE=chat                              # "completions" for llama.cpp servers
+export WACC_LAB_LLM_ENABLED=1</code></pre>
+    <p>
+      The client speaks the OpenAI-compatible API, so the same code drives
+      Ollama, llmlite, llama.cpp and the OpenAI API. Servers built on llama.cpp
+      answer in <code>reasoning_content</code> instead of <code>content</code>;
+      that field is used as a fallback, and
+      <code>WACC_LAB_LLM_MODE=completions</code> switches to the plain
+      <code>/v1/completions</code> endpoint for those builds.
+    </p>
+    <p>
+      <code>WACC_LAB_LLM_ENABLED=0</code> turns the whole analyst step off, and
+      so does the <code>use_llm=false</code> query parameter on any request.
+    </p>
+
+    <div class="note warn">
+      <span class="label">The model is not downloaded</span>
+      <p>
+        The tool never pulls a model. It talks to whatever is already running on
+        the configured endpoint. If nothing answers there, the analysis still
+        works: the missing inputs fall back to their documented defaults and the
+        interface says which ones they were.
+      </p>
+    </div>
+
+    <h2>What the first run looks like</h2>
+    <ol>
+      <li>Pick <code>AAPL</code> from the catalog, or type any Yahoo symbol.</li>
+      <li>The status line turns green and says where the answer came from:
+      <code>computed and stored</code>, <code>served from the SQLite cache</code>,
+      <code>cached snapshot was stale, recomputed</code> or
+      <code>recomputed from Yahoo Finance</code>.</li>
+      <li>Four cards fill in: the summary, the WACC, the growth rate and the
+      valuation. Below them, the inputs table, the grid, the news and the
+      warnings.</li>
+      <li>Read the warnings before you read the numbers. They say which inputs
+      were defaulted, which caps fired and how far the trailing cash flow is
+      from the normalized one.</li>
+    </ol>
+
+    <div class="next-links">
+      <a href="interface.html">The interface</a>
+      <a href="methodology.html">Methodology</a>
+      <a href="api.html">API reference</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

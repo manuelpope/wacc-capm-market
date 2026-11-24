@@ -73,6 +73,7 @@ T8 | S9 | inline | done | sensitivity engine, endpoint, grid card with the colou
 T9 | S10 | inline | done | normalization engine, provider series, valuation base, UI rows, bug review
 T10 | S11 | inline | done | second review: interface script, engine edge cases, store concurrency, hostile inputs
 T11 | S11 | inline | done | third review: unbounded grid parameters, hostile payloads, provider fragility, interface races
+T12 | S6 | inline | done | the HTML wiki in docs/, served at /wiki, with tests that keep it honest
 
 ## Log
 
@@ -172,3 +173,8 @@ L24 (2026-11-24): Third review pass, before the first release. Ten defects found
 10. The README still said the tool had no WACC × g grid, which it has had for two increments.
 
 The test suite could not be run in this environment (the shell that executes Python was blocked for the whole session), so the changes were verified by reading the code and the arithmetic of each case, not by running it.
+
+L25 (2026-11-24): The documentation was the last thing missing. There is now a wiki in `docs/`: nine pages of plain HTML with no build step, covering the quick start, the methodology, the analyst fallback, the sensitivity grid, the interface, the API, the architecture and the honest list of limits. Two decisions worth recording:
+- the navigation is built by `docs/assets/wiki.js` from one list, so every page keeps the same links and only the content is duplicated;
+- the pages are served by the application at `/wiki`, and FastAPI keeps `/docs` for its own interactive documentation.
+The wiki is part of the repository, so it is tested like the rest of the code: `tests/test_docs.py` parses every page, checks that it is well-formed, that it has a title, a navigation and its assets, and that every local link points at a file that exists. A broken link in the documentation is a small thing, but it is the kind of thing nobody notices for a year. The suite is 140 tests, all green.

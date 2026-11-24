@@ -265,6 +265,17 @@ def test_the_web_interface_is_served(client):
     assert "WACC" in response.text
 
 
+def test_the_wiki_is_served(client):
+    test_client, _ = client
+
+    response = test_client.get("/wiki/")
+
+    if response.status_code == 404:
+        pytest.skip("the wiki is not part of this installation")
+    assert response.status_code == 200
+    assert "WACC Lab" in response.text
+
+
 def test_health_endpoint_reports_the_configuration(client):
     test_client, _ = client
 

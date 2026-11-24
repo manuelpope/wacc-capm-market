@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The analyst fallback — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="analyst">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>The analyst fallback</h1>
+    <p class="lead">
+      When Yahoo Finance cannot supply a number, a local model is asked for the
+      gap — and only the gap. Everything that keeps the answer honest is
+      written down here.
+    </p>
+
+    <h2>What it may touch</h2>
+    <p>
+      Five fields, and only when the provider marked them as a fallback or as
+      unavailable:
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Accepted range</th><th>Considered plausible</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Pre-tax cost of debt</th><td>0% – 30%</td><td>0.5% – 20%</td></tr>
+          <tr><th>Effective tax rate</th><td>0% – 50%</td><td>3% – 45%</td></tr>
+          <tr><th>ROE</th><td>−50% – 150%</td><td>−30% – 100%</td></tr>
+          <tr><th>Retention ratio</th><td>0% – 100%</td><td>0% – 100%</td></tr>
+          <tr><th>Free cash flow margin</th><td>−30% – 60%</td><td>−10% – 45%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      A value that Yahoo computed is never overwritten. The provider records
+      the provenance of every field in <code>field_sources</code>, and that map
+      is what decides whether a field is a gap.
+    </p>
+
+    <h2>What it may not do</h2>
+    <ul>
+      <li><strong>It never estimates a scale.</strong> Market cap, revenue, the
+      share count and the price always come from Yahoo. The cash flow is a
+      <em>margin</em> the model provides, multiplied by the trailing revenue
+      that Yahoo reported.</li>
+      <li><strong>It never sees an unknown ticker.</strong> A ticker Yahoo does
+      not know is a 404, not an invitation to invent a company.</li>
+      <li><strong>It never replaces the source.</strong> If Yahoo Finance is
+      unreachable, the request fails with an error instead of quietly serving an
+      invented company.</li>
+    </ul>
+
+    <h2>How the answer is validated</h2>
+    <ol>
+      <li>The model answers with JSON only, and every field it did not fill
+      comes back as <code>null</code>.</li>
+      <li>A value outside the accepted range is tried as a percentage: a whole
+      number like <code>21</code> is normalized to <code>0.21</code> when the
+      fraction is plausible.</li>
+      <li>If it is still implausible, the value is discarded and the refusal is
+      reported in the warnings. It is not silently dropped.</li>
+      <li>A model that fails, times out or answers prose leaves the company
+      exactly as it was.</li>
+    </ol>
+
+    <div class="note info">
+      <span class="label">How you know</span>
+      <p>
+        Every value the model writes is labelled <span class="chip llm">llm</span>
+        in <code>field_sources</code>, carries a warning naming the field and
+        the model, and shows an <span class="chip llm">LLM</span> badge in the
+        inputs table. The estimates live in their own table next to the
+        snapshot, so a second request costs nothing and
+        <code>use_llm=false</code> ignores them completely.
+      </p>
+    </div>
+
+    <h3>And when the model says no</h3>
+    <p>
+      A model that declines to fill a field is an answer too, and it is cached
+      with the snapshot, so the model is not asked again on every request. A
+      <em>failure</em> is not cached: the model may well be reachable on the
+      next one.
+    </p>
+
+    <h2>The news</h2>
+    <p>
+      The headlines are the context the analyst reads before it estimates
+      anything. A recent debt issue, a dividend decision, an acquisition or an
+      outage changes what a sensible cost of debt or retention ratio looks like.
+    </p>
+    <ul>
+      <li>The feed is the Yahoo Finance news of the ticker, cached in SQLite
+      with its own TTL of six hours.</li>
+      <li>Yahoo mixes market-wide stories into a ticker feed, so the stories
+      that name the ticker or the company are ranked first and the ones that
+      say nothing about the company are dropped when enough relevant ones are
+      left.</li>
+      <li>The title, the publisher, the date and a truncated summary go into
+      the prompt, and the model is asked to take them into account and to say
+      in the note when a headline drove the estimate.</li>
+      <li>A short ticker such as <code>T</code> only matches as a word of its
+      own, so "The market rallied" is not about AT&amp;T.</li>
+      <li><strong>A news failure never takes the valuation down.</strong> The
+      news are context, not the analysis.</li>
+    </ul>
+
+    <div class="note info">
+      <span class="label">What the model said, once</span>
+      <p>
+        On a live run over a recent outage story, the analyst answered:
+        "recent outage news does not materially alter the cost of existing
+        debt". That is the shape of a useful answer: a reason, attached to a
+        field.
+      </p>
+    </div>
+
+    <h2>Turning it off</h2>
+    <p>Three ways, and they all behave the same way:</p>
+    <pre><code># per request
+curl "http://127.0.0.1:8000/api/analysis/AAPL?use_llm=false"
+
+# for the whole process
+export WACC_LAB_LLM_ENABLED=0
+
+# from the interface: the "Analyst model for missing data" switch</code></pre>
+    <p>
+      With the analyst off, the exact Yahoo values come back, the gaps fall
+      back to their documented defaults, and the news are not loaded at all.
+    </p>
+
+    <div class="next-links">
+      <a href="methodology.html">Methodology</a>
+      <a href="api.html">API reference</a>
+      <a href="limits.html">What it cannot do</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

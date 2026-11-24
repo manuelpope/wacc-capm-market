@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sensitivity (WACC x g) — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="sensitivity">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>Sensitivity (WACC x g)</h1>
+    <p class="lead">
+      A single value per share hides the question that matters: how much of this
+      number depends on the two assumptions that carry the most weight? The grid
+      answers it.
+    </p>
+
+    <h2>How to read it</h2>
+    <p>
+      The grid recomputes the whole valuation for each combination of a WACC and
+      a growth rate around the base case. It is nine by nine cells.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>What you see</th><th>What it means</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th><span class="chip">base case</span></th>
+            <td>The outlined cell. It always matches the valuation shown above
+            it, exactly.</td>
+          </tr>
+          <tr>
+            <th><span class="chip">green</span></th>
+            <td>Above the current price. The intensity follows the distance.</td>
+          </tr>
+          <tr>
+            <th><span class="chip">red</span></th>
+            <td>Below the current price.</td>
+          </tr>
+          <tr>
+            <th><span class="chip">dashed</span></th>
+            <td>The WACC and g are less than 3% apart. The number is there, but
+            the terminal value dominates it.</td>
+          </tr>
+          <tr>
+            <th><span class="chip">n/a</span></th>
+            <td>The growth rate is not below the WACC, so the terminal value does
+            not exist and no number is reported.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>The axes</h2>
+    <p>
+      By default the axes are the base WACC and the base growth rate, plus or
+      minus two percentage points in steps of 0.5. The size is set by two query
+      parameters:
+    </p>
+    <pre><code>GET /api/analysis/AAPL/sensitivity?span=0.02&amp;step=0.005</code></pre>
+
+    <div class="note info">
+      <span class="label">The size of the grid is bounded</span>
+      <p>
+        <code>span</code> has to be between 0.001 and 0.25 and
+        <code>step</code> between 0.0005 and 0.05. The engine refuses a grid
+        larger than 401 points per axis or 160,000 cells. Anything outside the
+        bounds is answered with a <code>422</code> instead of being allowed to
+        build a grid of millions of cells.
+      </p>
+    </div>
+
+    <h2>What the grid does not do</h2>
+    <p>
+      The grid does <strong>not</strong> apply the growth ceiling of the base
+      case, because exploring assumptions above the ceiling is the point of a
+      grid. It applies only the mathematical rule: a cell needs
+      <code>g &lt; WACC</code> to exist.
+    </p>
+    <p>
+      It also does not move anything else. Net debt, the share count and the
+      base cash flow are held fixed, so what you are looking at is the
+      sensitivity to the discount rate and the growth rate and nothing else.
+    </p>
+
+    <h2>What the grid is for</h2>
+    <p>
+      The grid is what makes the caps legible. The 5% ceiling and the 3%
+      minimum spread are policy, and they are not visible as numbers in the
+      base case. The grid shows that the whole optimistic corner of the table
+      lives inside the fragile zone: a bull case built on a narrow spread is
+      arithmetically large and economically weak.
+    </p>
+    <p>
+      For Apple the grid runs from $100.65 (WACC 12.43%, g 3%) to $698.88
+      (WACC 8.43%, g 7%) — a sevenfold range around a base case of $179.43 —
+      and the two most optimistic corners are exactly the fragile ones.
+    </p>
+
+    <div class="note warn">
+      <span class="label">The grid inherits every weakness of the model</span>
+      <p>
+        It perturbs the WACC and the g of a simple model, so it inherits every
+        weakness of that model. It ignores the correlation between the two
+        inputs: a WACC that falls because the business got safer usually comes
+        with a growth rate that falls too, and the grid does not show that
+        path.
+      </p>
+    </div>
+
+    <h2>When there is no grid</h2>
+    <p>
+      A company whose cash flow is not positive has no numbers to show, and the
+      grid says so instead of rendering an empty table. The same is true when
+      the valuation itself could not be computed.
+    </p>
+
+    <div class="next-links">
+      <a href="methodology.html">Methodology</a>
+      <a href="api.html">API reference</a>
+      <a href="limits.html">What it cannot do</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

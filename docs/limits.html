@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>What it cannot do — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="limits">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>What it cannot do</h1>
+    <p class="lead">
+      This is the honest list. None of these are hidden behind a default, and
+      none of them are fixed by the warnings.
+    </p>
+
+    <h2>The model</h2>
+    <ol>
+      <li><strong>It is not a full DCF.</strong> One FCF base growing at one
+      rate, discounted at one rate. There is no working capital schedule, no
+      capex plan, no debt schedule, no three-statement model and no mid-year
+      convention.</li>
+      <li><strong>The normalization is an average, not an adjustment.</strong>
+      The base is the mean of the last three fiscal years, which smooths the
+      noise but does not correct for a known one-off — a restructuring, a year
+      of heavy capex, a litigation charge. For a growing company the average
+      sits below the latest year, so the model grows from a lower base than the
+      trailing number would give. Three years is a short window for a cyclical
+      business.</li>
+      <li><strong>g is an identity, not a forecast.</strong>
+      <code>ROE × retention</code> says what growth the current returns can
+      fund; it says nothing about what the market expects. It is also inflated
+      by buybacks, which is why it usually hits the 5% ceiling.</li>
+      <li><strong>The caps are policy, not finance.</strong> The 5% ceiling and
+      the 3% minimum spread move the answer. They exist to keep the perpetuity
+      meaningful; they are not derived from anything.</li>
+      <li><strong>Beta is raw.</strong> Yahoo's 5-year monthly beta, with no
+      Blume adjustment, no country risk, no size premium and no idiosyncratic
+      risk adjustment. The equity risk premium is a fixed 5.00%, not
+      estimated.</li>
+      <li><strong>The cost of debt is approximate.</strong> Interest expense
+      over the <em>latest</em> total debt, not the average debt of the period.
+      For a company that changed its debt level during the year the ratio is
+      biased, and interest expense that nets against interest income
+      understates the true cost.</li>
+      <li><strong>The capital structure is incomplete.</strong> Market cap plus
+      total debt. Operating leases, pensions, minority interests, preferred
+      stock and unfunded obligations are ignored.</li>
+      <li><strong>The tax rate is effective, not marginal.</strong> Trailing
+      tax provision over trailing pre-tax income. Net operating losses, credits
+      and deferred taxes are ignored.</li>
+      <li><strong>No currency conversion.</strong> Every figure stays in the
+      reporting currency of the ticker. Comparing a US dollar DCF with a euro
+      or yen one is not meaningful.</li>
+      <li><strong>No consensus estimates and no scenarios.</strong> There is no
+      analyst forecast and no bull/base/bear case. There <em>is</em> a WACC x g
+      grid, which is a sensitivity table and not a forecast: it moves the two
+      inputs of the model and says nothing about what the business will do.</li>
+    </ol>
+
+    <h2>The data</h2>
+    <ol start="11">
+      <li><strong>Yahoo Finance data is scraped, not contracted.</strong>
+      <code>yfinance</code> reads non-public endpoints. Row names change,
+      fields go missing and rate limiting happens. A missing field becomes a
+      fallback with a warning, never a crash.</li>
+      <li><strong>TTM assumes four quarters.</strong> If a company has fewer
+      quarters reported, the sum covers a shorter period, and the tool does
+      count the quarters and say so — but the figure is still not a year.</li>
+      <li><strong>Value per share ignores future dilution.</strong> It uses
+      the current share count; stock-based compensation and convertible
+      instruments are not projected.</li>
+    </ol>
+
+    <h2>The application</h2>
+    <ol start="14">
+      <li><strong>One local user, one file.</strong> No authentication, no
+      multi-user isolation, no migration story beyond the
+      <code>CREATE TABLE IF NOT EXISTS</code> schema. The database is local and
+      unencrypted.</li>
+      <li><strong>Only the latest analysis is kept.</strong> There is no
+      valuation history per ticker, so you cannot see how the WACC moved over
+      time.</li>
+      <li><strong>Manual growth is still constrained.</strong> A manual g is
+      not subject to the 5% ceiling, but it is forced to keep the minimum
+      spread below the WACC. The result reports that it was capped.</li>
+    </ol>
+
+    <h2>The analyst</h2>
+    <ol start="17">
+      <li><strong>The analyst fallback is a model, not data.</strong> An LLM
+      estimate is a plausible guess based on the sector and the company
+      profile. It is labelled, range-checked and never allowed to overwrite
+      Yahoo, but it is still a guess: treat every <span class="chip llm">llm</span>
+      value as an assumption, not as a fact.</li>
+      <li><strong>The analyst cannot rescue a broken snapshot.</strong> If Yahoo
+      Finance is unreachable, the request fails with an error instead of
+      quietly serving an invented company. The fallback fills gaps, it does not
+      replace the source.</li>
+      <li><strong>The analyst is slow.</strong> A first call pays the model load
+      plus the inference — tens of seconds. The estimate is then cached with
+      the snapshot, so the second call is free.</li>
+      <li><strong>The news are headlines, not articles.</strong> The model reads
+      the title, the publisher, the date and a truncated summary. It does not
+      read the full story, and Yahoo's own relevance ranking decides what
+      reaches the feed.</li>
+      <li><strong>The news filter is textual.</strong> A story that mentions the
+      company in one sentence is kept, and a story about the company that never
+      says its name is dropped. The order of the headlines is a heuristic, not a
+      judgement.</li>
+    </ol>
+
+    <h2>The grid</h2>
+    <ol start="22">
+      <li><strong>The grid moves one thing at a time.</strong> It perturbs the
+      WACC and the g of a simple model, so it inherits every weakness of that
+      model, and it ignores the correlation between the two inputs: a WACC that
+      falls because the business got safer usually comes with a growth rate
+      that falls too, and the grid does not show that path.</li>
+      <li><strong>The fragile flag is a threshold, not a measurement.</strong> A
+      cell is flagged when the WACC and g are less than 3% apart, because below
+      that the Gordon denominator stops meaning anything. How bad the number is
+      in that corner is left to the reader.</li>
+    </ol>
+
+    <div class="note warn">
+      <span class="label">The one thing to remember</span>
+      <p>
+        This tool tells you what a set of assumptions produces, and how much
+        the answer moves when those assumptions move. It does not tell you that
+        the assumptions are right. Read the
+        <a href="methodology.html">methodology</a>, read the warnings, and read
+        the fragile corner of the grid before you believe a number.
+      </p>
+    </div>
+
+    <div class="next-links">
+      <a href="methodology.html">Methodology</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="index.html">Overview</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>

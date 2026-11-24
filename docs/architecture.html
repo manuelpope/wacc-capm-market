@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture — WACC Lab</title>
+<link rel="stylesheet" href="assets/wiki.css" />
+</head>
+<body data-page="architecture">
+<header class="masthead">
+  <button class="menu" id="menu">Menu</button>
+  <a class="mark" href="index.html">WACC Lab <span>· documentation</span></a>
+  <span class="version" id="version">v1.0.0</span>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <main class="content">
+    <h1>Architecture</h1>
+    <p class="lead">
+      Five layers, each one small, each one replaceable. The rule of the
+      project is that complexity is added by editing existing units, never by
+      replacing them.
+    </p>
+
+    <h2>The layers</h2>
+    <pre><code>browser  ──▶  api.py  ──▶  service.py  ──┬──▶  engine/     (pure)
+                                                  ├──▶  providers/  (the network)
+                                                  └──▶  db.py        (the cache)</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Module</th><th>Its job</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th><code>api.py</code></th>
+            <td>The routes, the query parameters and the error codes. It knows
+            nothing about how a number is computed.</td>
+          </tr>
+          <tr>
+            <th><code>service.py</code></th>
+            <td>The orchestration: the provider, the cache, the overrides, the
+            analyst step and the engines, in that order.</td>
+          </tr>
+          <tr>
+            <th><code>engine/</code></th>
+            <td>Pure functions. They take numbers and return numbers with
+            warnings. They never touch the network and they never read the
+            clock.</td>
+          </tr>
+          <tr>
+            <th><code>providers/</code></th>
+            <td>Everything that talks to the outside: Yahoo, the news feed and
+            the model.</td>
+          </tr>
+          <tr>
+            <th><code>db.py</code></th>
+            <td>A thin, explicit SQLite wrapper. One short-lived connection per
+            call.</td>
+          </tr>
+          <tr>
+            <th><code>static/</code></th>
+            <td>The interface. Plain HTML, CSS and JavaScript, served as
+            files. No build step.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>The store</h2>
+    <p>One SQLite file, five tables:</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Table</th><th>What it holds</th></tr>
+        </thead>
+        <tbody>
+          <tr><th><code>snapshots</code></th><td>The raw fundamentals per ticker, with the fetch timestamp</td></tr>
+          <tr><th><code>overrides</code></th><td>The manual inputs per ticker</td></tr>
+          <tr><th><code>llm_estimates</code></th><td>What the analyst estimated, next to the snapshot it belongs to</td></tr>
+          <tr><th><code>news</code></th><td>The headlines, with the timestamp of the fetch</td></tr>
+          <tr><th><code>universe</code></th><td>The curated ticker catalog</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The cache</h3>
+    <ul>
+      <li>The ticker is not stored → it is computed and stored
+      (<code>computed</code>).</li>
+      <li>It is stored but older than the TTL → it is recomputed
+      (<code>stale</code>).</li>
+      <li>It is stored and fresh → it is served without touching Yahoo
+      (<code>fresh</code>).</li>
+      <li><code>?refresh=true</code> → it is always recomputed
+      (<code>refreshed</code>).</li>
+    </ul>
+
+    <h3>Three decisions worth knowing</h3>
+    <ul>
+      <li><strong>The schema is created on the first use, not when the object is
+      built.</strong> Importing the application must not create or touch the
+      database file, because the module level app is built at import time.</li>
+      <li><strong>The journal mode is set once.</strong> Changing it needs an
+      exclusive lock that the busy timeout does not wait for, so a concurrent
+      request would fail with "database is locked".</li>
+      <li><strong>A snapshot carries a schema version.</strong> A snapshot
+      written by an older version is fetched again instead of being read with
+      missing fields.</li>
+    </ul>
+
+    <h2>Concurrency</h2>
+    <p>
+      The application answers from a thread pool, so two requests can write at
+      the same time. Every store call opens its own short-lived connection with
+      a busy timeout, and the write transactions are short enough to fit inside
+      it. The suite proves it with eight parallel requests for the same ticker
+      and with parallel reads and writes.
+    </p>
+
+    <h2>The tests</h2>
+    <p>
+      The suite is 120 tests and it never touches the network: the API tests
+      inject a fake provider and a fake model.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>File</th><th>What it holds</th></tr>
+        </thead>
+        <tbody>
+          <tr><th><code>test_engines.py</code></th><td>The WACC, the growth and the valuation, one case at a time</td></tr>
+          <tr><th><code>test_properties.py</code></th><td>The invariants that must hold for any input, checked against seeded random values</td></tr>
+          <tr><th><code>test_sensitivity.py</code></th><td>The grid: the axes, the base cell, the invalid cells and the fragile ones</td></tr>
+          <tr><th><code>test_api.py</code></th><td>The routes, the cache, the overrides, the analyst step, and the hostile inputs</td></tr>
+          <tr><th><code>test_llm.py</code></th><td>The parsing, the range validation and the provenance of the estimates</td></tr>
+          <tr><th><code>test_news.py</code></th><td>The shapes of the feed, the relevance ranking and the prompt context</td></tr>
+          <tr><th><code>test_db.py</code></th><td>The store, including the proof that importing does not touch the file</td></tr>
+          <tr><th><code>test_normalization.py</code></th><td>The average of the last fiscal years and the trailing figure</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note info">
+      <span class="label">The invariants</span>
+      <p>
+        The property tests check, for random inputs, that the growth never
+        reaches the discount rate, that the value falls when the discount rate
+        rises and rises when the growth rate rises, that nothing is ever a NaN,
+        and that the base cell of the grid is exactly the valuation.
+      </p>
+    </div>
+
+    <h2>The design record</h2>
+    <p>
+      The decisions above were not obvious, so they are written down: the
+      feature document in <code>odd/tasks/wacc-valuation-lab.md</code> holds
+      the specification, the log of what was found and the reason for each
+      policy. It is the reason the 5% ceiling is 5% and the 3% spread is 3%.
+    </p>
+
+    <div class="next-links">
+      <a href="api.html">API reference</a>
+      <a href="limits.html">What it cannot do</a>
+      <a href="index.html">Overview</a>
+    </div>
+  </main>
+</div>
+
+<script src="assets/wiki.js"></script>
+</body>
+</html>
