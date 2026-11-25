@@ -56,6 +56,22 @@ docker compose up --build
 The store lives in a volume named `wacc-data`, and the env file is mounted
 read-only at `/app/.env`, so the secrets never enter an image layer.
 
+A host without `/etc/resolv.conf` leaves the containers without a resolver,
+and Yahoo Finance stops answering. When that is the case, give the service a
+resolver in a `docker-compose.override.yml`:
+
+```yaml
+services:
+  wacc-lab:
+    ports: !override
+      - "5001:8000"
+    dns:
+      - 192.168.0.160
+```
+
+`!override` replaces the list of ports instead of adding to it: without it
+the container binds both 8000 and 5001.
+
 Run the tests:
 
 ```bash
