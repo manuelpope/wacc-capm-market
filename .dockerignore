@@ -1,0 +1,19 @@
+# The secrets of the model gateway never enter the image. The env file is
+# mounted next to it when the container runs.
+.env
+.env.*
+
+.git
+.gitignore
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.DS_Store
+
+data/*.db
+data/*.db-*
+
+tests
+odd

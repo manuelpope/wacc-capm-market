@@ -28,6 +28,12 @@ class LLMConfig:
     api_key: str | None = None
     timeout: float = 180.0
     mode: str = "chat"  # "chat" for /v1/chat/completions, "completions" for llama.cpp
+    # The account the request is billed to. OpenAI-compatible servers take it
+    # as a field of the request body.
+    user: str | None = None
+    # The reasoning effort to ask for. ``None`` leaves the field out, which is
+    # what a reasoning model that always thinks needs.
+    reasoning_effort: str | None = "none"
 
 
 class OpenAICompatibleClient:
@@ -85,15 +91,22 @@ class OpenAICompatibleClient:
             "temperature": 0,
             "stream": False,
         }
+        if self.config.user:
+            base["user"] = self.config.user
         # The reasoning mode and the default context size make a structured
         # extraction take minutes instead of seconds, so they are turned off
         # when the server understands the parameters. Servers that reject an
         # unknown field fall back to the plainer payloads.
+        effort = (
+            {"reasoning_effort": self.config.reasoning_effort}
+            if self.config.reasoning_effort
+            else {}
+        )
         payloads = [
             {
                 **base,
                 "response_format": {"type": "json_object"},
-                "reasoning_effort": "none",
+                **effort,
                 "options": {"num_ctx": 8192, "num_predict": 600},
             },
             {**base, "response_format": {"type": "json_object"}},
@@ -130,6 +143,8 @@ class OpenAICompatibleClient:
             "stream": False,
             "max_tokens": 900,
         }
+        if self.config.user:
+            payload["user"] = self.config.user
         data = self._post("/completions", payload)
         choices = data.get("choices") or []
         if not choices:

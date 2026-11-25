@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import urllib.error
+import urllib.request
+from typing import Self
 
 import pytest
 
@@ -13,6 +16,7 @@ from wacc_lab.providers.analyst import (
     extract_json_object,
     missing_gaps,
 )
+from wacc_lab.providers.llm import LLMConfig, OpenAICompatibleClient
 
 
 class FakeLLM:
@@ -357,3 +361,113 @@ def test_the_cash_flow_is_not_a_gap_when_the_annual_series_exists():
     )
 
     assert "fcf_ttm" not in missing_gaps(fund)
+
+
+# ------------------------------------------------------------- the HTTP client
+
+
+class FakeResponse:
+    """What urlopen returns, without a socket behind it."""
+
+    def __init__(self, payload: dict) -> None:
+        self.payload = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc_info: object) -> bool:
+        return False
+
+    def read(self) -> bytes:
+        return self.payload
+
+
+@pytest.fixture
+def captured(monkeypatch):
+    """The requests the client sends, answered with a fixed payload."""
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(request, timeout=None):
+        requests.append(request)
+        return FakeResponse({"choices": [{"message": {"content": "OK"}}]})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return requests
+
+
+def test_the_client_posts_to_the_chat_endpoint_of_the_base_url(captured):
+    client = OpenAICompatibleClient(
+        LLMConfig(base_url="http://matb.server.home.arpa:4000/v1", model="m")
+    )
+
+    client.complete("hello")
+
+    assert captured[0].full_url == "http://matb.server.home.arpa:4000/v1/chat/completions"
+
+
+def test_the_client_sends_the_key_as_a_bearer_token(captured):
+    client = OpenAICompatibleClient(
+        LLMConfig(base_url="http://host/v1", model="m", api_key="sk-secret")
+    )
+
+    client.complete("hello")
+
+    assert captured[0].get_header("Authorization") == "Bearer sk-secret"
+
+
+def test_the_client_sends_the_user_in_the_body(captured):
+    client = OpenAICompatibleClient(
+        LLMConfig(base_url="http://host/v1", model="m", user="LLMWACC")
+    )
+
+    client.complete("hello")
+
+    assert json.loads(captured[0].data)["user"] == "LLMWACC"
+
+
+def test_the_client_leaves_the_user_out_when_there_is_none(captured):
+    client = OpenAICompatibleClient(LLMConfig(base_url="http://host/v1", model="m"))
+
+    client.complete("hello")
+
+    assert "user" not in json.loads(captured[0].data)
+
+
+def test_the_client_asks_for_no_reasoning_by_default(captured):
+    client = OpenAICompatibleClient(LLMConfig(base_url="http://host/v1", model="m"))
+
+    client.complete("hello")
+
+    assert json.loads(captured[0].data)["reasoning_effort"] == "none"
+
+
+def test_the_client_leaves_the_reasoning_effort_out_when_it_is_none(captured):
+    # A reasoning model that always thinks rejects the field.
+    client = OpenAICompatibleClient(
+        LLMConfig(base_url="http://host/v1", model="m", reasoning_effort=None)
+    )
+
+    client.complete("hello")
+
+    assert "reasoning_effort" not in json.loads(captured[0].data)
+
+
+def test_the_client_falls_back_to_a_plainer_payload(monkeypatch):
+    # The first payload carries the reasoning effort, which the server may
+    # reject. The second one has to answer.
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(request, timeout=None):
+        requests.append(request)
+        if b"reasoning_effort" in request.data:
+            raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, None)
+        return FakeResponse({"choices": [{"message": {"content": "OK"}}]})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    client = OpenAICompatibleClient(
+        LLMConfig(base_url="http://host/v1", model="m", reasoning_effort="none")
+    )
+
+    assert client.complete("hello") == "OK"
+    assert len(requests) == 2

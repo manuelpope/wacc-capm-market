@@ -6,3 +6,12 @@ __pycache__/
 data/*.db
 data/*.db-*
 .DS_Store
+
+# The secrets of the model gateway. The template is kept, the real one is not.
+.env
+.env.*
+!.env.example
+
+# The local state of the IDE.
+.idea/
+.vscode/

@@ -60,6 +60,11 @@ S6. "empezamos desde lo simple a lo complejo siempre"
     Acceptance: README documents how to run, the methodology, and a "What it cannot do" section.
     Checks: manual readback
 
+S12. "necesito q este proyecte tome mi .env, y agrega en el git ignore el .env, y preparemos el docker compose"
+    Scope: The app reads a `.env` file next to it when it starts; the short names of the gateway credentials file (`url`, `model`, `user`, `MMX-API-KEY_VIRTUAL`) are read as aliases of the canonical `WACC_LAB_*` variables; the secret file is ignored by git and kept out of the image; a Dockerfile with a compose file runs the app, the store in a volume and the env file mounted read-only.
+    Acceptance: `/api/health` reports the model, the base URL and the env file that were read; a real environment variable wins over the file; the file is never committed and never copied into an image layer; `docker compose up --build` serves the app on the port 8000 with the analyst answering through the gateway.
+    Checks: `uv run pytest tests/test_config.py tests/test_deployment.py -q` and a live analysis against the gateway
+
 ## Tasks
 
 T1 | S2, S3 | inline | done | f260f57 — engines + unit tests (14 tests, RED observed first)
@@ -74,6 +79,7 @@ T9 | S10 | inline | done | normalization engine, provider series, valuation base
 T10 | S11 | inline | done | second review: interface script, engine edge cases, store concurrency, hostile inputs
 T11 | S11 | inline | done | third review: unbounded grid parameters, hostile payloads, provider fragility, interface races
 T12 | S6 | inline | done | the HTML wiki in docs/, served at /wiki, with tests that keep it honest
+T13 | S12 | inline | done | the env file loader and its aliases, the gitignore, the Dockerfile and the compose file
 
 ## Log
 
@@ -178,3 +184,13 @@ L25 (2026-11-24): The documentation was the last thing missing. There is now a w
 - the navigation is built by `docs/assets/wiki.js` from one list, so every page keeps the same links and only the content is duplicated;
 - the pages are served by the application at `/wiki`, and FastAPI keeps `/docs` for its own interactive documentation.
 The wiki is part of the repository, so it is tested like the rest of the code: `tests/test_docs.py` parses every page, checks that it is well-formed, that it has a title, a navigation and its assets, and that every local link points at a file that exists. A broken link in the documentation is a small thing, but it is the kind of thing nobody notices for a year. The suite is 140 tests, all green.
+
+L26 (2026-11-25): The app now takes its env file, and the secret in it is kept out of the repository and out of the image. Four decisions worth recording:
+- the env file is read with `python-dotenv`, now a direct dependency of the project. A parser of its own was written first, to also understand the `KEY:VALUE` form of the credentials file, and it was dropped when the file was rewritten in the standard form: a library does the reading better than hand-written code does, and there was no reason left to keep the custom one;
+- a real environment variable always wins over the file, so an export in the shell overrides it without anyone editing anything;
+- the short names of the credentials file are read as aliases of the canonical variables: `url`, `model`, `user` and `MMX-API-KEY_VIRTUAL`. The canonical name always wins. A base URL that carries only a host and a port gets the `/v1` prefix of the OpenAI-compatible API, because the client appends `/chat/completions` to it;
+- the env file is mounted read-only into the container and never copied into an image layer. The app reads it with the same code it uses outside a container, so the compose file does not depend on the parser of Docker.
+
+Two things the gateway said that changed the code. `reasoning_effort: "none"` is rejected by a model that always thinks, so the effort became configurable and `omit` leaves the field out of the request. And the account the request is billed to travels as the `user` field of the body, which the OpenAI-compatible API defines.
+
+The suite is 172 tests, all green.

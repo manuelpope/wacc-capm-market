@@ -550,7 +550,10 @@ async function resetOverrides() {
 async function init() {
   try {
     const health = await request("/api/health");
-    $("health").textContent = `SQLite · TTL ${health.ttl_hours}h`;
+    const analyst = health.analyst && health.analyst.enabled ? health.analyst.model_name : null;
+    $("health").textContent = analyst
+      ? `SQLite · TTL ${health.ttl_hours}h · ${analyst}`
+      : `SQLite · TTL ${health.ttl_hours}h`;
     await loadCatalog();
     const saved = window.localStorage.getItem("wacc-lab-ticker");
     if (saved) {

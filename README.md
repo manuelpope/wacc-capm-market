@@ -34,6 +34,28 @@ export WACC_LAB_LLM_BASE_URL=http://127.0.0.1:11434/v1
 export WACC_LAB_LLM_MODEL=qwen3.5:9b-mlx
 ```
 
+Those variables can live in a `.env` file next to the project instead of in
+the shell. Copy the template and fill it in:
+
+```bash
+cp .env.example .env
+```
+
+The app reads it when it starts, and a real environment variable always wins
+over the file. The short names of the gateway credentials file — `url`,
+`model`, `user` and `MMX-API-KEY_VIRTUAL` — are read as aliases of the
+canonical variables. `.env` is in `.gitignore` and
+only the template is tracked.
+
+Run it in Docker instead:
+
+```bash
+docker compose up --build
+```
+
+The store lives in a volume named `wacc-data`, and the env file is mounted
+read-only at `/app/.env`, so the secrets never enter an image layer.
+
 Run the tests:
 
 ```bash
@@ -293,6 +315,24 @@ WACC_LAB_DB=/path/to/db.sqlite       # default: data/wacc_lab.db
 WACC_LAB_TTL_HOURS=24                # default: 24
 ```
 
+The analyst model takes its configuration the same way:
+
+```bash
+WACC_LAB_LLM_BASE_URL=http://127.0.0.1:11434/v1   # the OpenAI-compatible endpoint
+WACC_LAB_LLM_MODEL=qwen3.5:9b-mlx
+WACC_LAB_LLM_API_KEY=                               # only for a gateway that asks for one
+WACC_LAB_LLM_USER=                                  # the account the request is billed to
+WACC_LAB_LLM_TIMEOUT=180
+WACC_LAB_LLM_MODE=chat                              # "completions" for llama.cpp servers
+WACC_LAB_LLM_REASONING_EFFORT=none                 # "omit" leaves the field out
+WACC_LAB_LLM_ENABLED=1
+```
+
+A base URL that carries only a host and a port gets the `/v1` prefix of the
+OpenAI-compatible API. The short names of the gateway credentials file are
+read as aliases — `url`, `model`, `user` and `MMX-API-KEY_VIRTUAL` — and the
+canonical name always wins.
+
 ---
 
 ## What it cannot do
@@ -383,6 +423,7 @@ This is the honest list. None of these are hidden behind defaults.
 src/wacc_lab/
   api.py             FastAPI routes
   service.py         Provider + cache + overrides + analyst + engines
+  config.py          The settings, read from the environment and the env file
   db.py              SQLite store
   models.py          Pydantic models
   catalog.py         The curated ticker universe
@@ -400,6 +441,9 @@ src/wacc_lab/
   static/            index.html, app.js, styles.css (no build step)
 tests/               Engine, analyst and API tests, all offline
 odd/tasks/           The feature document used while building this
+Dockerfile           The image of the app
+docker-compose.yml   The app with its store in a volume
+.env.example         The template of the env file
 ```
 
 ---

@@ -37,6 +37,29 @@ uv sync --extra dev            # or: uv pip install -e ".[dev]"</code></pre>
     <pre><code>.venv/bin/python -m uvicorn wacc_lab.api:app --reload</code></pre>
     <p>Then open <a href="http://127.0.0.1:8000">http://127.0.0.1:8000</a>.</p>
 
+    <h2>The env file</h2>
+    <p>
+      The app reads a <code>.env</code> file next to it when it starts, so the
+      credentials of the model gateway do not need an export in the shell.
+      Copy the template and fill it in:
+    </p>
+    <pre><code>cp .env.example .env</code></pre>
+    <pre><code>WACC_LAB_LLM_BASE_URL=http://127.0.0.1:11434/v1
+WACC_LAB_LLM_MODEL=qwen3.5:9b-mlx
+WACC_LAB_LLM_API_KEY=</code></pre>
+    <p>
+      A real environment variable always wins over the file, so an export in
+      the shell overrides it without anyone editing it. The short names of
+      the gateway credentials file — <code>url</code>,
+      <code>model</code>, <code>user</code> and
+      <code>MMX-API-KEY_VIRTUAL</code> — are read as aliases of the canonical
+      variables.
+    </p>
+    <p>
+      The file is never committed: <code>.env</code> is in
+      <code>.gitignore</code> and only the template is tracked.
+    </p>
+
     <div class="note info">
       <span class="label">The first request is slow</span>
       <p>
@@ -67,6 +90,20 @@ curl "http://127.0.0.1:8000/api/analysis/AAPL/sensitivity"</code></pre>
       and a fake model, and the engine tests are pure.
     </p>
 
+    <h2>Run it in Docker</h2>
+    <pre><code>docker compose up --build</code></pre>
+    <p>
+      Then open <a href="http://127.0.0.1:8000">http://127.0.0.1:8000</a>
+      again. The image carries the app and its dependencies, the SQLite store
+      lives in a volume named <code>wacc-data</code>, and the env file is
+      mounted read-only at <code>/app/.env</code>: the app reads it with the
+      same parser it uses outside a container, and the secrets never enter an
+      image layer.
+    </p>
+    <pre><code>docker compose logs -f wacc-lab     # the log
+docker compose down                          # stop it
+docker compose down -v                       # stop it and drop the store</code></pre>
+
     <h2>Configuration</h2>
     <p>Everything is read from the environment, and every variable has a default.</p>
 
@@ -74,12 +111,17 @@ curl "http://127.0.0.1:8000/api/analysis/AAPL/sensitivity"</code></pre>
     <pre><code>WACC_LAB_DB=/path/to/db.sqlite       # default: data/wacc_lab.db
 WACC_LAB_TTL_HOURS=24                # default: 24</code></pre>
 
+    <h3>Where the env file is</h3>
+    <pre><code>WACC_LAB_ENV_FILE=/path/to/.env     # default: the .env next to the app</code></pre>
+
     <h3>The analyst model</h3>
     <pre><code>export WACC_LAB_LLM_BASE_URL=http://127.0.0.1:11434/v1   # Ollama, llmlite, llama.cpp, OpenAI
 export WACC_LAB_LLM_MODEL=qwen3.5:9b-mlx
 export WACC_LAB_LLM_API_KEY=                               # only for hosted providers
+export WACC_LAB_LLM_USER=                                  # the account the request is billed to
 export WACC_LAB_LLM_TIMEOUT=180
 export WACC_LAB_LLM_MODE=chat                              # "completions" for llama.cpp servers
+export WACC_LAB_LLM_REASONING_EFFORT=none                 # "omit" leaves the field out
 export WACC_LAB_LLM_ENABLED=1</code></pre>
     <p>
       The client speaks the OpenAI-compatible API, so the same code drives
@@ -88,6 +130,20 @@ export WACC_LAB_LLM_ENABLED=1</code></pre>
       that field is used as a fallback, and
       <code>WACC_LAB_LLM_MODE=completions</code> switches to the plain
       <code>/v1/completions</code> endpoint for those builds.
+    </p>
+    <p>
+      A base URL that carries only a host and a port gets the <code>/v1</code>
+      prefix of the OpenAI-compatible API. The short names of the gateway
+      credentials file are read as aliases: <code>url</code>,
+      <code>model</code>, <code>user</code> and
+      <code>MMX-API-KEY_VIRTUAL</code>. The canonical name always wins.
+    </p>
+    <p>
+      <code>WACC_LAB_LLM_REASONING_EFFORT=none</code> asks the server for no
+      reasoning, which is what a structured extraction needs.
+      <code>omit</code> leaves the field out of the request, which is what a
+      model that always thinks requires: it rejects the effort
+      <code>none</code>.
     </p>
     <p>
       <code>WACC_LAB_LLM_ENABLED=0</code> turns the whole analyst step off, and

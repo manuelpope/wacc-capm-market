@@ -53,6 +53,8 @@ def build_service(settings: Settings | None = None) -> AnalysisService:
                 api_key=settings.llm.api_key,
                 timeout=settings.llm.timeout,
                 mode=settings.llm.mode,
+                user=settings.llm.user,
+                reasoning_effort=settings.llm.reasoning_effort,
             )
         )
         analyst = AnalystExtractor(
@@ -101,6 +103,7 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
             "status": "ok",
             "database": str(active_service.store.path),
             "ttl_hours": active_service.ttl_hours,
+            "env_file": str(settings.env_file) if settings.env_file else None,
             "news": {
                 "enabled": active_service.news_provider is not None,
                 "ttl_hours": active_service.news_ttl_hours,
@@ -109,8 +112,11 @@ def create_app(service: AnalysisService | None = None) -> FastAPI:
             "analyst": {
                 "enabled": analyst is not None,
                 "model": analyst.model_label if analyst else None,
+                "model_name": settings.llm.model,
                 "base_url": settings.llm.base_url,
                 "mode": settings.llm.mode,
+                "user": settings.llm.user,
+                "api_key": "set" if settings.llm.api_key else "missing",
             },
         }
 

@@ -1,0 +1,37 @@
+# The app with the model gateway it reads from the env file.
+#
+#   docker compose up --build
+#
+# The env file is mounted read-only instead of being copied into the image,
+# and the app reads it with its own parser, so the `KEY:VALUE` form of the
+# gateway credentials file works the same as the `KEY=VALUE` one.
+services:
+  wacc-lab:
+    build: .
+    image: wacc-lab:1.0.0
+    container_name: wacc-lab
+    environment:
+      # The root of the app in the image: the env file and the wiki are read
+      # from there.
+      WACC_LAB_PROJECT_ROOT: /app
+      # The store lives in the volume, not in the image.
+      WACC_LAB_DB: /data/wacc_lab.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./.env:/app/.env:ro
+      - wacc-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  wacc-data:
